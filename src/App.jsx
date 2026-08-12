@@ -44,12 +44,11 @@ function Inbox({ back, setPage, jobs }) {
 }
 
 function Courses({ back, setPage, setSelectedCourse, courseList }) {
-  const [active, setActive] = useState(courseList[0] || emptyCourse)
-  useEffect(() => { if (courseList[0]) setActive(courseList[0]) }, [courseList])
+  const [filter, setFilter] = useState('')
+  const visibleCourses = courseList.filter(course => `${course.title} ${course.category} ${(course.tags || []).join(' ')}`.toLowerCase().includes(filter.toLowerCase()))
   return <section className="app-page"><PageHeader eyebrow="你的學習地圖" title="課程庫" description="所有課程、單元、字幕、筆記與提示詞都保有清楚的來源關係。" back={back} />
-    <div className="course-toolbar"><div><Search size={27} /><input placeholder="搜尋課程、概念或工具" /></div><button><Plus size={24} />新增課程</button></div>
-    <div className="course-grid">{courseList.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'} ${active.id === course.id ? 'selected' : ''}`} onClick={() => setActive(course)}><span>{course.category}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 部影片 · {course.processedCaptionCount || 0} 份字幕已整理</p><ArrowRight size={25} /></button>)}</div>
-    <section className="course-detail"><div><span className="eyebrow">目前選取</span><h2>{active.title}</h2><p>從原始素材到可搜尋的完整逐字稿、課程筆記與可執行工作流，都集中在這裡。</p></div><div className="detail-actions"><button onClick={() => { setSelectedCourse(active); setPage('detail') }}><BookOpen size={25} />打開課程</button><button onClick={() => setPage('chat')}><Search size={25} />搜尋這門課</button></div></section>
+    <div className="course-toolbar"><div><Search size={20} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="搜尋課程、標籤或工具" /></div><span className="course-count">{visibleCourses.length} / {courseList.length} 門課</span></div>
+    <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{course.category}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 部影片 · {course.processedCaptionCount || 0} 份字幕</p><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
   </section>
 }
 
