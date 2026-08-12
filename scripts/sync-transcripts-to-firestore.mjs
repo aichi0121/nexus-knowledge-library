@@ -59,7 +59,13 @@ function lessonFromNote(path) {
   const summary = stripMarkdown(section(markdown, '這一課在教什麼？'))
   const prompts = section(markdown, '提示詞')
   const source = section(markdown, '來源時間碼')
-  const sourceTimeRanges = [...source.matchAll(/\d{2}:\d{2}:\d{2}\s*(?:–|—|-)\s*\d{2}:\d{2}:\d{2}/g)].map(match => match[0].replace(/\s+/g, ''))
+  const sourceReferences = source.split('\n').flatMap(line => {
+    const match = line.match(/(\d{2}:\d{2}:\d{2}\s*(?:–|—|-)\s*\d{2}:\d{2}:\d{2})[`:：\s]+(.+)/)
+    if (!match) return []
+    const note = stripMarkdown(match[2])
+    return useful(note) ? [{ time: match[1].replace(/\s+/g, ''), note }] : []
+  })
+  const sourceTimeRanges = sourceReferences.map(item => item.time)
   const status = markdown.match(/^status:\s*(.+)$/m)?.[1]?.trim()
   return {
     id: slug(filename),
@@ -67,7 +73,7 @@ function lessonFromNote(path) {
     ...(useful(summary) ? { summary } : {}),
     ...(tools.length ? { tools } : {}),
     ...(steps.length ? { steps } : {}),
-    ...(sourceTimeRanges.length ? { sourceTimeRanges } : {}),
+    ...(sourceTimeRanges.length ? { sourceTimeRanges, sourceReferences } : {}),
     ...(useful(prompts) ? { prompts: listFrom(prompts) } : {}),
     ...(status ? { status } : {}),
   }
@@ -112,13 +118,14 @@ async function syncCourse(db, ownerId, folder, dryRun) {
   const noteFiles = existsSync(notesFolder) ? readdirSync(notesFolder).filter(name => name.endsWith('.md')) : []
   if (!files.length && !noteFiles.length) return { segments: 0, notes: 0 }
   const course = metadata(folder)
-  const records = files.flatMap(file => {
+  const notesOnly = process.argv.includes('--notes-only')
+  const records = notesOnly ? [] : files.flatMap(file => {
     const name = file.replace(/_字幕潤飾版\.vtt$/, '')
     const lessonId = slug(name)
     return segments(join(transcriptFolder, file)).map((segment, index) => ({ id: `${lessonId}-${String(index + 1).padStart(4, '0')}`, lessonId, sourceCaptionPath: file, tags: [course.category], ...segment }))
   })
   const lessons = noteFiles.map(file => ({ ...lessonFromNote(join(notesFolder, file)), obsidianPath: `01｜單元筆記/${file}` }))
-  console.log(`${course.title}：${records.length} 個段落、${lessons.length} 則單元筆記`)
+  console.log(`${course.title}：${notesOnly ? '略過字幕索引' : `${records.length} 個段落`}、${lessons.length} 則單元筆記`)
   if (dryRun) return { segments: records.length, notes: lessons.length }
   for (let i = 0; i < records.length; i += 400) {
     const batch = db.batch()
@@ -139,7 +146,7 @@ async function syncCourse(db, ownerId, folder, dryRun) {
     legacyNotes.forEach(doc => batch.delete(doc.ref))
     await batch.commit()
   }
-  await db.doc(`courses/${course.id}`).set({ ownerId, title: course.title, category: course.category, transcriptSegmentCount: records.length, noteCount: lessons.length, transcriptIndexedAt: FieldValue.serverTimestamp(), notesSyncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+  await db.doc(`courses/${course.id}`).set({ ownerId, title: course.title, category: course.category, ...(notesOnly ? {} : { transcriptSegmentCount: records.length, transcriptIndexedAt: FieldValue.serverTimestamp() }), noteCount: lessons.length, notesSyncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
   return { segments: records.length, notes: lessons.length }
 }
 

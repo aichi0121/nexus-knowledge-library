@@ -45,10 +45,18 @@ function Inbox({ back, setPage, jobs }) {
 
 function Courses({ back, setPage, setSelectedCourse, courseList }) {
   const [filter, setFilter] = useState('')
-  const visibleCourses = courseList.filter(course => `${course.title} ${course.category} ${(course.tags || []).join(' ')}`.toLowerCase().includes(filter.toLowerCase()))
+  const [category, setCategory] = useState('全部領域')
+  const [state, setState] = useState('全部狀態')
+  const categories = ['全部領域', ...new Set(courseList.map(course => course.category).filter(Boolean))]
+  const states = ['全部狀態', '有筆記', '待整理', '無字幕']
+  const courseState = course => course.noteCount || course.processedCaptionCount ? (course.noteCount ? '有筆記' : '待整理') : '無字幕'
+  const visibleCourses = courseList.filter(course => {
+    const matchesText = `${course.title} ${course.category} ${(course.tags || []).join(' ')}`.toLowerCase().includes(filter.toLowerCase())
+    return matchesText && (category === '全部領域' || course.category === category) && (state === '全部狀態' || courseState(course) === state)
+  })
   return <section className="app-page"><PageHeader eyebrow="你的學習地圖" title="課程庫" description="所有課程、單元、字幕、筆記與提示詞都保有清楚的來源關係。" back={back} />
-    <div className="course-toolbar"><div><Search size={20} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="搜尋課程、標籤或工具" /></div><span className="course-count">{visibleCourses.length} / {courseList.length} 門課</span></div>
-    <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{course.category}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 部影片 · {course.processedCaptionCount || 0} 份字幕</p><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
+    <div className="course-toolbar"><div><Search size={20} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="搜尋課程、標籤或工具" /></div><select value={category} onChange={event => setCategory(event.target.value)}>{categories.map(item => <option key={item}>{item}</option>)}</select><select value={state} onChange={event => setState(event.target.value)}>{states.map(item => <option key={item}>{item}</option>)}</select><span className="course-count">{visibleCourses.length} / {courseList.length} 門課</span></div>
+    <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{course.category}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 部影片 · {course.processedCaptionCount || 0} 份字幕</p><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
   </section>
 }
 
@@ -62,12 +70,12 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId }) {
   return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />
     <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>{lessons.length.toString().padStart(2, '0')}</strong></div>{lessons.map(item => <button key={item.id} onClick={() => setUnit(item)} className={unit.id === item.id ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.duration}</small></button>)}</aside>
       <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.duration}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
-        <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{(unit.tools?.length || unit.steps?.length) > 0 && <button className={tab === 'methods' ? 'active' : ''} onClick={() => setTab('methods')}>工具與方法</button>}{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}<button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button></div>
+        <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{(unit.tools?.length || unit.steps?.length) > 0 && <button className={tab === 'methods' ? 'active' : ''} onClick={() => setTab('methods')}>工具與方法</button>}{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}{unit.sourceReferences?.length > 0 && <button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button>}</div>
         <AnimatePresence mode="wait"><motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lesson-content">
           {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>{unit.summary || '此單元正在等待本機處理結果同步。'}</p><div className="key-points"><span>本課已整理</span><ol><li>完整繁體字幕，保留全部 {unit.captionCues?.toLocaleString() || 0} 段時間碼。</li><li>原始字幕與清理版分開保留。</li><li>內容可回到來源時間碼確認。</li></ol></div></>}
           {tab === 'methods' && <><h3>工具與方法</h3>{unit.tools?.length > 0 && <div className="key-points"><span>相關工具</span><div className="tool-chips">{unit.tools.map(tool => <b key={tool}>{tool}</b>)}</div></div>}{unit.steps?.length > 0 && <div className="key-points"><span>實作步驟</span><ol>{unit.steps.map(step => <li key={step}>{step}</li>)}</ol></div>}</>}
           {tab === 'prompt' && <><h3>提示詞與工作流</h3>{unit.prompts.map(item => <div className="prompt-block" key={item.title}><strong>{item.title}</strong><code>{item.content}</code></div>)}</>}
-          {tab === 'sources' && <><h3>可回查來源</h3><div className="timeline">{(unit.sourceTimeRanges || []).map(time => <button key={time}><time>{time}</time><span>已同步來源時間碼</span><Play size={20} /></button>)}{!unit.sourceTimeRanges?.length && <p>此單元尚未同步可回查的時間碼。</p>}</div></>}
+          {tab === 'sources' && <><h3>可回查來源</h3><p className="source-explainer">每一段都附上筆記說明；點選後可改用「搜尋這一課」回到相關逐字稿。</p><div className="timeline">{(unit.sourceReferences || []).map(reference => <div key={reference.time} className="timeline-item"><time>{reference.time}</time><span>{reference.note}</span></div>)}</div></>}
         </motion.div></AnimatePresence>
         <footer><button onClick={() => setPage('chat')}><Search size={23} />搜尋這一課</button></footer>
       </article>
