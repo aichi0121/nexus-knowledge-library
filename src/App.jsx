@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { auth, db } from './firebase'
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore'
-import { seedInitialNexusData } from './nexusData'
+import { ensureInitialNexusData } from './nexusData'
 
 const emptyCourse = { title: '尚未同步課程', category: '等待同步', lessonCount: 0, processedCaptionCount: 0, color: 'amber' }
 
@@ -62,9 +62,10 @@ function CourseDetail({ course, back, setPage, lessons }) {
   return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />
     <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>{lessons.length.toString().padStart(2, '0')}</strong></div>{lessons.map(item => <button key={item.id} onClick={() => setUnit(item)} className={unit.id === item.id ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.duration}</small></button>)}</aside>
       <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.duration}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
-        <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}<button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button></div>
+        <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{(unit.tools?.length || unit.steps?.length) > 0 && <button className={tab === 'methods' ? 'active' : ''} onClick={() => setTab('methods')}>工具與方法</button>}{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}<button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button></div>
         <AnimatePresence mode="wait"><motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lesson-content">
           {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>{unit.summary || '此單元正在等待本機處理結果同步。'}</p><div className="key-points"><span>本課已整理</span><ol><li>完整繁體字幕，保留全部 {unit.captionCues?.toLocaleString() || 0} 段時間碼。</li><li>原始字幕與清理版分開保留。</li><li>內容可回到來源時間碼確認。</li></ol></div></>}
+          {tab === 'methods' && <><h3>工具與方法</h3>{unit.tools?.length > 0 && <div className="key-points"><span>相關工具</span><p>{unit.tools.join(' · ')}</p></div>}{unit.steps?.length > 0 && <div className="key-points"><span>實作步驟</span><ol>{unit.steps.map(step => <li key={step}>{step}</li>)}</ol></div>}</>}
           {tab === 'prompt' && <><h3>提示詞與工作流</h3>{unit.prompts.map(item => <div className="prompt-block" key={item.title}><strong>{item.title}</strong><code>{item.content}</code></div>)}</>}
           {tab === 'sources' && <><h3>可回查來源</h3><div className="timeline">{(unit.sourceTimeRanges || []).map(time => <button key={time}><time>{time}</time><span>已同步來源時間碼</span><Play size={20} /></button>)}{!unit.sourceTimeRanges?.length && <p>此單元尚未同步可回查的時間碼。</p>}</div></>}
         </motion.div></AnimatePresence>
@@ -146,7 +147,8 @@ export function App() {
     const ownCourses = query(collection(db, 'courses'), where('ownerId', '==', user.uid))
     const ownJobs = query(collection(db, 'processingJobs'), where('ownerId', '==', user.uid))
     const stopCourses = onSnapshot(ownCourses, async (snapshot) => {
-      if (snapshot.empty) { await seedInitialNexusData(db, user); return }
+      await ensureInitialNexusData(db, user)
+      if (snapshot.empty) return
       const nextCourses = snapshot.docs.map(item => ({ id: item.id, ...item.data() }))
       setCourseList(nextCourses)
       setSelectedCourse(current => current && nextCourses.some(item => item.id === current.id) ? current : nextCourses[0])
