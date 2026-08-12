@@ -52,10 +52,11 @@ function Courses({ back, setPage, setSelectedCourse, courseList }) {
   </section>
 }
 
-function CourseDetail({ course, back, setPage, lessons }) {
+function CourseDetail({ course, back, setPage, lessons, initialLessonId }) {
   const [unit, setUnit] = useState(lessons[0])
   const [tab, setTab] = useState('overview')
   useEffect(() => { if (lessons[0]) setUnit(lessons[0]) }, [lessons])
+  useEffect(() => { const target = lessons.find(item => item.id === initialLessonId); if (target) setUnit(target) }, [initialLessonId, lessons])
   useEffect(() => { if (unit && tab === 'prompt' && !unit.prompts?.length) setTab('overview') }, [unit, tab])
   if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description="正在讀取單元資料…" back={back} /></section>
   return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />
@@ -64,7 +65,7 @@ function CourseDetail({ course, back, setPage, lessons }) {
         <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{(unit.tools?.length || unit.steps?.length) > 0 && <button className={tab === 'methods' ? 'active' : ''} onClick={() => setTab('methods')}>工具與方法</button>}{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}<button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button></div>
         <AnimatePresence mode="wait"><motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lesson-content">
           {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>{unit.summary || '此單元正在等待本機處理結果同步。'}</p><div className="key-points"><span>本課已整理</span><ol><li>完整繁體字幕，保留全部 {unit.captionCues?.toLocaleString() || 0} 段時間碼。</li><li>原始字幕與清理版分開保留。</li><li>內容可回到來源時間碼確認。</li></ol></div></>}
-          {tab === 'methods' && <><h3>工具與方法</h3>{unit.tools?.length > 0 && <div className="key-points"><span>相關工具</span><p>{unit.tools.join(' · ')}</p></div>}{unit.steps?.length > 0 && <div className="key-points"><span>實作步驟</span><ol>{unit.steps.map(step => <li key={step}>{step}</li>)}</ol></div>}</>}
+          {tab === 'methods' && <><h3>工具與方法</h3>{unit.tools?.length > 0 && <div className="key-points"><span>相關工具</span><div className="tool-chips">{unit.tools.map(tool => <b key={tool}>{tool}</b>)}</div></div>}{unit.steps?.length > 0 && <div className="key-points"><span>實作步驟</span><ol>{unit.steps.map(step => <li key={step}>{step}</li>)}</ol></div>}</>}
           {tab === 'prompt' && <><h3>提示詞與工作流</h3>{unit.prompts.map(item => <div className="prompt-block" key={item.title}><strong>{item.title}</strong><code>{item.content}</code></div>)}</>}
           {tab === 'sources' && <><h3>可回查來源</h3><div className="timeline">{(unit.sourceTimeRanges || []).map(time => <button key={time}><time>{time}</time><span>已同步來源時間碼</span><Play size={20} /></button>)}{!unit.sourceTimeRanges?.length && <p>此單元尚未同步可回查的時間碼。</p>}</div></>}
         </motion.div></AnimatePresence>
@@ -74,7 +75,7 @@ function CourseDetail({ course, back, setPage, lessons }) {
   </section>
 }
 
-function Chat({ back, setPage, courseList, lessons, selectedCourse }) {
+function Chat({ back, setPage, courseList, lessons, selectedCourse, openResult }) {
   const [question, setQuestion] = useState('')
   const [searching, setSearching] = useState(false)
   const [messages, setMessages] = useState([{ who: 'ai', text: '輸入關鍵字、工具名稱或課程概念，我會找出完整逐字稿、筆記、提示詞與對應來源。' }])
@@ -83,22 +84,22 @@ function Chat({ back, setPage, courseList, lessons, selectedCourse }) {
     if (!text) return
     setSearching(true)
     const terms = text.toLowerCase().split(/\s+/).filter(Boolean)
-    const matches = [...courseList.map(course => ({ type: '課程', title: course.title, detail: [course.category, ...(course.tags || [])].join(' · '), source: '課程總覽' })), ...lessons.map(lesson => ({ type: '單元', title: lesson.title, detail: lesson.summary || lesson.status, source: lesson.sourceTimeRanges?.[0] || '單元筆記' }))].filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term))).slice(0, 6)
+    const matches = [...courseList.map(course => ({ type: '課程', title: course.title, detail: [course.category, ...(course.tags || [])].join(' · '), source: '課程總覽', courseId: course.id })), ...lessons.map(lesson => ({ type: '單元', title: lesson.title, detail: lesson.summary || lesson.status, source: lesson.sourceTimeRanges?.[0] || '單元筆記', courseId: selectedCourse?.id, lessonId: lesson.id }))].filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term))).slice(0, 6)
     let transcriptMatches = []
     if (selectedCourse?.id) {
       const snapshot = await getDocs(collection(db, 'courses', selectedCourse.id, 'transcriptSegments'))
       transcriptMatches = snapshot.docs.map(item => item.data()).filter(segment => terms.every(term => segment.cleanText.toLowerCase().includes(term))).slice(0, 3)
     }
-    transcriptMatches.forEach(segment => matches.push({ type: '逐字稿片段', title: `${segment.startTime}–${segment.endTime}`, detail: segment.cleanText.length > 150 ? `${segment.cleanText.slice(0, 150)}…` : segment.cleanText, source: `${selectedCourse.title} · ${segment.startTime}` }))
+    transcriptMatches.forEach(segment => matches.push({ type: '逐字稿片段', title: `${segment.startTime}–${segment.endTime}`, detail: segment.cleanText.length > 150 ? `${segment.cleanText.slice(0, 150)}…` : segment.cleanText, source: `${selectedCourse.title} · ${segment.startTime}`, courseId: selectedCourse.id, lessonId: segment.lessonId, sourceTime: segment.startTime }))
     const answer = matches.length
       ? `找到 ${matches.length} 筆相關資料：\n${matches.map(item => `・${item.type}｜${item.title}\n  ${item.detail}`).join('\n')}`
       : '目前找不到完全相符的索引。可以改用課程名稱、工具名稱、標籤或單元名稱搜尋；完整逐字稿片段會在下一階段同步後加入搜尋。'
-    setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: answer, source: matches.map(item => item.source).join(' · ') }])
+    setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: answer, source: matches.map(item => item.source).join(' · '), results: matches }])
     setQuestion('')
     setSearching(false)
   }
   return <section className="app-page chat-page"><PageHeader eyebrow="不使用 AI API" title="知識搜尋" description="以課程、逐字稿、筆記、提示詞與來源時間碼做全文搜尋；每個結果都能回到原課內容。" back={back} />
-    <div className="chat-layout"><aside><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('互動視頻')}>互動視頻</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋課程、標籤、工具或逐字稿內容⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
+    <div className="chat-layout"><aside><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('互動視頻')}>互動視頻</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.results?.map(result => <button className="search-result" key={`${result.type}-${result.title}-${result.source}`} onClick={() => openResult(result)}><span>{result.type}</span><b>{result.title}</b><small>{result.source}</small><ArrowRight size={17} /></button>)}{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋課程、標籤、工具或逐字稿內容⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
   </section>
 }
 
@@ -145,6 +146,7 @@ export function App() {
   const [courseList, setCourseList] = useState([])
   const [jobs, setJobs] = useState([])
   const [selectedCourse, setSelectedCourse] = useState(null)
+  const [selectedLessonId, setSelectedLessonId] = useState(null)
   const [lessons, setLessons] = useState([])
   const signIn = async () => { const result = await signInWithPopup(auth, new GoogleAuthProvider()); await setDoc(doc(db, 'users', result.user.uid), { displayName: result.user.displayName || 'Nexus 使用者', email: result.user.email || '', createdAt: serverTimestamp() }, { merge: true }) }
   useEffect(() => {
@@ -167,6 +169,12 @@ export function App() {
       setLessons(snapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort((a, b) => (a.sequence || 0) - (b.sequence || 0)))
     })
   }, [selectedCourse?.id])
+  const openSearchResult = (result) => {
+    const course = courseList.find(item => item.id === result.courseId) || selectedCourse
+    if (course) setSelectedCourse(course)
+    setSelectedLessonId(result.lessonId || null)
+    setPage('detail')
+  }
   if (!allowed) return <LoginGate user={user} ready={authReady} allowed={allowed} signIn={signIn} />
-  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} courseList={courseList} lessons={lessons} selectedCourse={selectedCourse} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
+  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} courseList={courseList} lessons={lessons} selectedCourse={selectedCourse} openResult={openSearchResult} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} initialLessonId={selectedLessonId} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
 }
