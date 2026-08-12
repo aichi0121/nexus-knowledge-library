@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, ArrowRight, BookOpen, Check, CircleUserRound, Clock3, Copy, FileText, FileUp, FolderOpen, MessageCircle, Play, Plus, Search, Sparkles, Upload, Video } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BookOpen, Check, CircleUserRound, Clock3, FileText, FolderOpen, MessageCircle, Play, Plus, Search, Sparkles, Upload, Video } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { auth, db } from './firebase'
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
@@ -24,7 +24,7 @@ function Nav({ page, setPage }) {
 function Home({ setPage, courseCount, jobCount }) {
   return <>
     <section className="hero" id="top">
-      <video className="hero-image" autoPlay loop muted playsInline preload="metadata" aria-label="雲海之上的靜謐學習場景"><source src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_171521_25968ba2-b594-4b32-aab7-f6b69398a6fa.mp4" type="video/mp4" /></video>
+      <img className="hero-image" src={`${import.meta.env.BASE_URL}assets/nexus-hero-clouds.png`} alt="雲海之上的靜謐學習場景" />
       <div className="hero-shade" />
       <nav className="top-nav" aria-label="首頁導覽"><button onClick={() => setPage('chat')}>知識搜尋</button><button onClick={() => setPage('courses')}>課程庫</button><button onClick={() => setPage('inbox')}>處理紀錄</button><button onClick={() => setPage('obsidian')}>Obsidian 知識庫</button><button className="account-button" onClick={() => setPage('account')} aria-label="登入與帳號" title="登入與帳號"><CircleUserRound size={21} /></button></nav>
       <div className="hero-content"><motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .8 }} className="hero-title"><span>Nexus</span><sup>*</sup></motion.div><div className="hero-side"><motion.p initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .3 }}>一座只屬於你的跨領域學習記憶庫。把課程、字幕、講義與靈感，變成隨時找得到、用得上的理解。</motion.p><motion.button initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .5 }} className="primary-btn" onClick={() => setPage('chat')}>問問你的知識庫 <span><ArrowRight size={24} /></span></motion.button></div></div>
@@ -56,22 +56,19 @@ function Courses({ back, setPage, setSelectedCourse, courseList }) {
 function CourseDetail({ course, back, setPage, lessons }) {
   const [unit, setUnit] = useState(lessons[0])
   const [tab, setTab] = useState('overview')
-  const [copied, setCopied] = useState(false)
-  const prompt = '以 [角色特徵] 為核心，維持人物臉部、髮型與服裝一致；鏡頭從 [起始畫面] 緩慢推進至 [最終畫面]，自然光線，電影感質地。'
-  const copyPrompt = () => { navigator.clipboard?.writeText(prompt); setCopied(true); setTimeout(() => setCopied(false), 1600) }
   useEffect(() => { if (lessons[0]) setUnit(lessons[0]) }, [lessons])
+  useEffect(() => { if (unit && tab === 'prompt' && !unit.prompts?.length) setTab('overview') }, [unit, tab])
   if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description="正在讀取單元資料…" back={back} /></section>
   return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />
     <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>{lessons.length.toString().padStart(2, '0')}</strong></div>{lessons.map(item => <button key={item.id} onClick={() => setUnit(item)} className={unit.id === item.id ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.duration}</small></button>)}</aside>
-      <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.time}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
-        <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>清理逐字稿</button><button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞</button><button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button></div>
+      <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.duration}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
+        <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}<button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button></div>
         <AnimatePresence mode="wait"><motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lesson-content">
           {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>{unit.summary || '此單元正在等待本機處理結果同步。'}</p><div className="key-points"><span>本課已整理</span><ol><li>完整繁體字幕，保留全部 {unit.captionCues?.toLocaleString() || 0} 段時間碼。</li><li>原始字幕與清理版分開保留。</li><li>內容可回到來源時間碼確認。</li></ol></div></>}
-          {tab === 'transcript' && <><h3>清理後逐字稿</h3><p className="transcript">網站只保存同步後的知識索引；完整潤飾字幕留在 Obsidian Vault，原始 VTT 不會被覆寫。</p><p className="transcript">這個單元目前已同步 {unit.captionCues?.toLocaleString() || 0} 段字幕索引。</p></>}
-          {tab === 'prompt' && <><h3>本課萃取的提示詞</h3><p>開營儀式未提供可直接複製的完整提示詞。後續會從實作單元擷取提示詞，並附上課程來源時間碼。</p></>}
+          {tab === 'prompt' && <><h3>提示詞與工作流</h3>{unit.prompts.map(item => <div className="prompt-block" key={item.title}><strong>{item.title}</strong><code>{item.content}</code></div>)}</>}
           {tab === 'sources' && <><h3>可回查來源</h3><div className="timeline">{(unit.sourceTimeRanges || []).map(time => <button key={time}><time>{time}</time><span>已同步來源時間碼</span><Play size={20} /></button>)}{!unit.sourceTimeRanges?.length && <p>此單元尚未同步可回查的時間碼。</p>}</div></>}
         </motion.div></AnimatePresence>
-        <footer><button onClick={() => setPage('chat')}><Search size={23} />搜尋這一課</button><button><FileUp size={23} />查看原始素材</button></footer>
+        <footer><button onClick={() => setPage('chat')}><Search size={23} />搜尋這一課</button></footer>
       </article>
     </div>
   </section>
