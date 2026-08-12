@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, BookOpen, Check, CircleUserRound, Clock3, FileTe
 import { useEffect, useState } from 'react'
 import { auth, db } from './firebase'
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
-import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore'
+import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore'
 import { ensureInitialNexusData } from './nexusData'
 
 const emptyCourse = { title: '尚未同步課程', category: '等待同步', lessonCount: 0, processedCaptionCount: 0, color: 'amber' }
@@ -74,25 +74,31 @@ function CourseDetail({ course, back, setPage, lessons }) {
   </section>
 }
 
-function Chat({ back, setPage, courseList, lessons }) {
+function Chat({ back, setPage, courseList, lessons, selectedCourse }) {
   const [question, setQuestion] = useState('')
+  const [searching, setSearching] = useState(false)
   const [messages, setMessages] = useState([{ who: 'ai', text: '輸入關鍵字、工具名稱或課程概念，我會找出完整逐字稿、筆記、提示詞與對應來源。' }])
-  const send = () => {
+  const send = async () => {
     const text = question.trim()
     if (!text) return
+    setSearching(true)
     const terms = text.toLowerCase().split(/\s+/).filter(Boolean)
-    const matches = [
-      ...courseList.map(course => ({ type: '課程', title: course.title, detail: [course.category, ...(course.tags || [])].join(' · '), source: '課程總覽' })),
-      ...lessons.map(lesson => ({ type: '單元', title: lesson.title, detail: lesson.summary || lesson.status, source: lesson.sourceTimeRanges?.[0] || '單元筆記' })),
-    ].filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term))).slice(0, 6)
+    const matches = [...courseList.map(course => ({ type: '課程', title: course.title, detail: [course.category, ...(course.tags || [])].join(' · '), source: '課程總覽' })), ...lessons.map(lesson => ({ type: '單元', title: lesson.title, detail: lesson.summary || lesson.status, source: lesson.sourceTimeRanges?.[0] || '單元筆記' }))].filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term))).slice(0, 6)
+    let transcriptMatches = []
+    if (selectedCourse?.id) {
+      const snapshot = await getDocs(collection(db, 'courses', selectedCourse.id, 'transcriptSegments'))
+      transcriptMatches = snapshot.docs.map(item => item.data()).filter(segment => terms.every(term => segment.cleanText.toLowerCase().includes(term))).slice(0, 3)
+    }
+    transcriptMatches.forEach(segment => matches.push({ type: '逐字稿片段', title: `${segment.startTime}–${segment.endTime}`, detail: segment.cleanText.length > 150 ? `${segment.cleanText.slice(0, 150)}…` : segment.cleanText, source: `${selectedCourse.title} · ${segment.startTime}` }))
     const answer = matches.length
       ? `找到 ${matches.length} 筆相關資料：\n${matches.map(item => `・${item.type}｜${item.title}\n  ${item.detail}`).join('\n')}`
       : '目前找不到完全相符的索引。可以改用課程名稱、工具名稱、標籤或單元名稱搜尋；完整逐字稿片段會在下一階段同步後加入搜尋。'
     setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: answer, source: matches.map(item => item.source).join(' · ') }])
     setQuestion('')
+    setSearching(false)
   }
   return <section className="app-page chat-page"><PageHeader eyebrow="不使用 AI API" title="知識搜尋" description="以課程、逐字稿、筆記、提示詞與來源時間碼做全文搜尋；每個結果都能回到原課內容。" back={back} />
-    <div className="chat-layout"><aside><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('互動視頻')}>互動視頻</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋課程、標籤、工具或單元名稱⋯⋯" /><button onClick={send} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
+    <div className="chat-layout"><aside><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('互動視頻')}>互動視頻</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋課程、標籤、工具或逐字稿內容⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
   </section>
 }
 
@@ -162,5 +168,5 @@ export function App() {
     })
   }, [selectedCourse?.id])
   if (!allowed) return <LoginGate user={user} ready={authReady} allowed={allowed} signIn={signIn} />
-  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} courseList={courseList} lessons={lessons} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
+  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} courseList={courseList} lessons={lessons} selectedCourse={selectedCourse} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
 }
