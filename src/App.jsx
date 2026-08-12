@@ -104,12 +104,24 @@ function Obsidian({ back, setPage }) {
   </section>
 }
 
-function Account({ back, user }) {
+function Account({ back, user, allowed }) {
   const [busy, setBusy] = useState(false)
   const signIn = async () => { setBusy(true); try { const result = await signInWithPopup(auth, new GoogleAuthProvider()); await setDoc(doc(db, 'users', result.user.uid), { displayName: result.user.displayName || 'Nexus 使用者', email: result.user.email || '', createdAt: serverTimestamp() }, { merge: true }) } finally { setBusy(false) } }
   return <section className="app-page"><PageHeader eyebrow="私人知識庫" title="登入與帳號" description="正式上線後，這裡會使用你的帳號保護課程索引、處理紀錄與知識搜尋結果。" back={back} />
-    <div className="course-detail"><div><span className="eyebrow">{user ? '已登入' : 'Firebase 已連線'}</span><h2>{user ? `歡迎回來，${user.displayName || 'Nexus 使用者'}。` : '建立你的私人入口。'}</h2><p>{user ? '你的課程、處理紀錄與搜尋資料會以此帳號隔離。' : '使用 Google 登入後，網站才會讀取或建立屬於你的知識庫資料。'}</p></div><div className="detail-actions"><button onClick={user ? () => signOut(auth) : signIn} disabled={busy}><CircleUserRound size={25} />{busy ? '登入中…' : user ? '登出' : '使用 Google 登入'}</button></div></div>
+    <div className="course-detail"><div><span className="eyebrow">{user && allowed ? '已登入' : 'Firebase 已連線'}</span><h2>{user && allowed ? `歡迎回來，${user.displayName || 'Nexus 使用者'}。` : '建立你的私人入口。'}</h2><p>{user && !allowed ? '這個 Google 帳號尚未獲得 Nexus 的存取權。請改用已授權的帳號登入。' : user ? '你的課程、處理紀錄與搜尋資料會以此帳號隔離。' : '使用 Google 登入後，網站才會讀取或建立屬於你的知識庫資料。'}</p></div><div className="detail-actions"><button onClick={user ? () => signOut(auth) : signIn} disabled={busy}><CircleUserRound size={25} />{busy ? '登入中…' : user ? '登出並切換帳號' : '使用 Google 登入'}</button></div></div>
   </section>
+}
+
+function LoginGate({ user, ready, allowed, signIn }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const start = async () => {
+    setBusy(true)
+    setError('')
+    try { await signIn() } catch (err) { setError(err?.code === 'auth/unauthorized-domain' ? '這個網站網址尚未加入 Firebase 的授權網域。' : '登入沒有完成，請再試一次。') } finally { setBusy(false) }
+  }
+  if (!ready) return <main className="login-gate"><span className="eyebrow">Nexus</span><h1>正在確認你的私人入口…</h1></main>
+  return <main className="login-gate"><span className="eyebrow">Nexus 個人跨領域知識庫</span><h1>{user && !allowed ? '這個帳號尚未獲得存取權' : '你的知識庫，只開給你。'}</h1><p>{user && !allowed ? '請登出後，使用已授權的 Google 帳號登入。' : '請先使用已授權的 Google 帳號登入，再查看課程、逐字稿與學習紀錄。'}</p><button className="primary-btn" onClick={user ? () => signOut(auth) : start} disabled={busy}><CircleUserRound size={23} />{busy ? '登入中…' : user ? '登出並切換帳號' : '使用 Google 登入'}</button>{error && <small className="login-error">{error}</small>}</main>
 }
 
 export function App() {
@@ -120,7 +132,12 @@ export function App() {
   void db
   const [page, setPage] = useState('home')
   const [user, setUser] = useState(null)
-  useEffect(() => onAuthStateChanged(auth, setUser), [])
+  const [authReady, setAuthReady] = useState(false)
+  const allowedEmail = 'aichi0121@gmail.com'
+  const allowed = user?.email?.toLowerCase() === allowedEmail
+  useEffect(() => onAuthStateChanged(auth, (nextUser) => { setUser(nextUser); setAuthReady(true) }), [])
   const [selectedCourse, setSelectedCourse] = useState(courses[0])
-  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} />}{page === 'detail' && <CourseDetail course={selectedCourse} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
+  const signIn = async () => { const result = await signInWithPopup(auth, new GoogleAuthProvider()); await setDoc(doc(db, 'users', result.user.uid), { displayName: result.user.displayName || 'Nexus 使用者', email: result.user.email || '', createdAt: serverTimestamp() }, { merge: true }) }
+  if (!allowed) return <LoginGate user={user} ready={authReady} allowed={allowed} signIn={signIn} />
+  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && <CourseDetail course={selectedCourse} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
 }
