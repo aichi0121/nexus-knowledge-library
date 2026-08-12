@@ -51,6 +51,8 @@ for (const name of noteNames) {
 if (!noteNames.length) console.log('尚未找到「*_字幕潤飾版.vtt」，已建立課程總覽；字幕完成後再執行一次即可建立單元筆記。')
 
 if (!dryRun && !skipSync) {
+  console.log('建立可校對的單元筆記初稿…')
+  execFileSync(process.execPath, ['scripts/generate-lesson-note-drafts.mjs', courseFolder], { cwd: projectRoot, stdio: 'inherit' })
   console.log('開始同步到 Nexus 網站…')
   execFileSync(process.execPath, ['scripts/sync-transcripts-to-firestore.mjs'], { cwd: projectRoot, stdio: 'inherit' })
 }

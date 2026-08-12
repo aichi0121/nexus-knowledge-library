@@ -11,8 +11,11 @@ let running = false
 function sync() {
   if (running) return
   running = true
-  const child = spawn(process.execPath, [syncScript], { cwd: projectRoot, stdio: 'inherit' })
-  child.on('exit', () => { running = false })
+  const child = spawn(process.execPath, ['scripts/generate-lesson-note-drafts.mjs'], { cwd: projectRoot, stdio: 'inherit' })
+  child.on('exit', () => {
+    const syncChild = spawn(process.execPath, [syncScript], { cwd: projectRoot, stdio: 'inherit' })
+    syncChild.on('exit', () => { running = false })
+  })
 }
 
 watch(vault, { recursive: true }, (_, changed) => {

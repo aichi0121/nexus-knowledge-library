@@ -38,6 +38,8 @@ npm run course:prepare -- "/Users/zhengweizhi/Documents/Nexus Obsidian Vault/02�
 
 它只會補上缺少的課程總覽與單元筆記範本，不會覆寫既有筆記；接著會同步課程、筆記、工具／方法、實作步驟和字幕索引到 Nexus 網站。日後直接編輯單元筆記或字幕潤飾版，背景同步器會自動更新網站。
 
+新建的筆記會先由字幕產生「自動整理候選」：列出字幕中提及的工具與優先回查時間碼，協助你快速校對後完成摘要與實作步驟。候選內容不會覆寫任何正式筆記；校對後直接在 Obsidian 修改即可同步。
+
 ## Firebase 設定
 
 專案已使用 Firebase Authentication（Google）與 Firestore。若換成新的正式網站網址，請在 Firebase Console 的：
