@@ -40,6 +40,14 @@ npm run course:prepare -- "/Users/zhengweizhi/Documents/Nexus Obsidian Vault/02�
 
 新建的筆記會先由字幕產生「自動整理候選」：列出字幕中提及的工具與優先回查時間碼，協助你快速校對後完成摘要與實作步驟。候選內容不會覆寫任何正式筆記；校對後直接在 Obsidian 修改即可同步。
 
+## 課程庫盤點
+
+```bash
+npm run courses:inventory
+```
+
+會讀取「Nexus Obsidian Vault／02-課程庫」與「Nexus 待處理課程」兩處的資料夾，只同步課程名稱、領域、原始／已整理字幕數量、筆記與講義數量到網站；不會搬移、上傳或修改任何原始課程檔案。
+
 ## Firebase 設定
 
 專案已使用 Firebase Authentication（Google）與 Firestore。若換成新的正式網站網址，請在 Firebase Console 的：

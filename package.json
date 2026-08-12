@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "course:prepare": "node scripts/prepare-course-for-nexus.mjs",
-    "notes:draft": "node scripts/generate-lesson-note-drafts.mjs"
+    "notes:draft": "node scripts/generate-lesson-note-drafts.mjs",
+    "courses:inventory": "node scripts/inventory-course-library.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "5.0.4",

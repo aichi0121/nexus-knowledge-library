@@ -48,15 +48,15 @@ function Courses({ back, setPage, setSelectedCourse, courseList }) {
   const [category, setCategory] = useState('全部領域')
   const [state, setState] = useState('全部狀態')
   const categories = ['全部領域', ...new Set(courseList.map(course => course.category).filter(Boolean))]
-  const states = ['全部狀態', '有筆記', '待整理', '無字幕']
-  const courseState = course => course.noteCount || course.processedCaptionCount ? (course.noteCount ? '有筆記' : '待整理') : '無字幕'
+  const states = ['全部狀態', '有筆記', '字幕已整理', '待整理', '無字幕']
+  const courseState = course => course.inventoryState || (course.noteCount ? '有筆記' : course.processedCaptionCount ? '字幕已整理' : course.rawCaptionCount ? '待整理' : '無字幕')
   const visibleCourses = courseList.filter(course => {
     const matchesText = `${course.title} ${course.category} ${(course.tags || []).join(' ')}`.toLowerCase().includes(filter.toLowerCase())
     return matchesText && (category === '全部領域' || course.category === category) && (state === '全部狀態' || courseState(course) === state)
   })
   return <section className="app-page"><PageHeader eyebrow="你的學習地圖" title="課程庫" description="所有課程、單元、字幕、筆記與提示詞都保有清楚的來源關係。" back={back} />
     <div className="course-toolbar"><div><Search size={20} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="搜尋課程、標籤或工具" /></div><select value={category} onChange={event => setCategory(event.target.value)}>{categories.map(item => <option key={item}>{item}</option>)}</select><select value={state} onChange={event => setState(event.target.value)}>{states.map(item => <option key={item}>{item}</option>)}</select><span className="course-count">{visibleCourses.length} / {courseList.length} 門課</span></div>
-    <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{course.category}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 部影片 · {course.processedCaptionCount || 0} 份字幕</p><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
+    <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{course.category}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 個單元 · 原始字幕 {course.rawCaptionCount || 0} · 已整理 {course.processedCaptionCount || 0}</p><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
   </section>
 }
 
@@ -66,7 +66,7 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId }) {
   useEffect(() => { if (lessons[0]) setUnit(lessons[0]) }, [lessons])
   useEffect(() => { const target = lessons.find(item => item.id === initialLessonId); if (target) setUnit(target) }, [initialLessonId, lessons])
   useEffect(() => { if (unit && tab === 'prompt' && !unit.prompts?.length) setTab('overview') }, [unit, tab])
-  if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description="正在讀取單元資料…" back={back} /></section>
+  if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.inventoryState || '待處理'} · 原始字幕 ${course.rawCaptionCount || 0} 份`} back={back} /><div className="course-detail"><div><span className="eyebrow">尚未建立網站單元</span><h2>這門課已完成盤點，尚未進入整理流程。</h2><p>原始資料仍留在本機待處理課程資料夾。開始字幕潤飾與單元筆記後，網站會自動建立可搜尋的課程內容。</p></div><div className="detail-actions"><button onClick={() => setPage('courses')}><FolderOpen size={22} />回到課程庫</button></div></div></section>
   return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />
     <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>{lessons.length.toString().padStart(2, '0')}</strong></div>{lessons.map(item => <button key={item.id} onClick={() => setUnit(item)} className={unit.id === item.id ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.duration}</small></button>)}</aside>
       <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.duration}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
