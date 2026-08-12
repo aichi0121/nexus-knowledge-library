@@ -3,17 +3,10 @@ import { ArrowLeft, ArrowRight, BookOpen, Check, CircleUserRound, Clock3, Copy, 
 import { useEffect, useState } from 'react'
 import { auth, db } from './firebase'
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
+import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore'
+import { seedInitialNexusData } from './nexusData'
 
-const courses = [
-  { title: '193｜（墨夏班）AI影片創作 0-1 實戰營', type: '數位工具｜AI', lessons: '123 部影片', progress: '3 份字幕已整理', color: 'amber' },
-]
-
-const inbox = [
-  { name: '開營儀式.vtt', meta: '字幕檔 · 2,004 段 · 原始檔已保留', state: '已完成潤飾', icon: FileText },
-  { name: 'AI 互動視頻自動獲客.vtt', meta: '字幕檔 · 3,757 段 · 原始檔已保留', state: '已完成潤飾', icon: FileText },
-  { name: 'Seedance 2.5 商業化項目拆解.vtt', meta: '字幕檔 · 3,457 段 · 原始檔已保留', state: '已完成潤飾', icon: FileText },
-]
+const emptyCourse = { title: '尚未同步課程', category: '等待同步', lessonCount: 0, processedCaptionCount: 0, color: 'amber' }
 
 function Nav({ page, setPage }) {
   return <nav className="app-nav" aria-label="主導覽">
@@ -28,7 +21,7 @@ function Nav({ page, setPage }) {
   </nav>
 }
 
-function Home({ setPage }) {
+function Home({ setPage, courseCount, jobCount }) {
   return <>
     <section className="hero" id="top">
       <video className="hero-image" autoPlay loop muted playsInline preload="metadata" aria-label="雲海之上的靜謐學習場景"><source src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_171521_25968ba2-b594-4b32-aab7-f6b69398a6fa.mp4" type="video/mp4" /></video>
@@ -36,50 +29,47 @@ function Home({ setPage }) {
       <nav className="top-nav" aria-label="首頁導覽"><button onClick={() => setPage('chat')}>知識搜尋</button><button onClick={() => setPage('courses')}>課程庫</button><button onClick={() => setPage('inbox')}>處理紀錄</button><button onClick={() => setPage('obsidian')}>Obsidian 知識庫</button><button className="account-button" onClick={() => setPage('account')} aria-label="登入與帳號" title="登入與帳號"><CircleUserRound size={21} /></button></nav>
       <div className="hero-content"><motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .8 }} className="hero-title"><span>Nexus</span><sup>*</sup></motion.div><div className="hero-side"><motion.p initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .3 }}>一座只屬於你的跨領域學習記憶庫。把課程、字幕、講義與靈感，變成隨時找得到、用得上的理解。</motion.p><motion.button initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .5 }} className="primary-btn" onClick={() => setPage('chat')}>問問你的知識庫 <span><ArrowRight size={24} /></span></motion.button></div></div>
     </section>
-    <section className="home-snapshot"><div><span className="eyebrow">今天的知識庫</span><h1>把學過的，<br /><em>變成用得上的。</em></h1></div><div className="snapshot-actions"><button onClick={() => setPage('chat')}><Search size={26} />知識搜尋 <b>快速找回</b></button><button onClick={() => setPage('courses')}><FolderOpen size={26} />課程庫 <b>1</b></button><button onClick={() => setPage('inbox')}><Clock3 size={26} />處理紀錄 <b>3</b></button><button onClick={() => setPage('obsidian')}><FileText size={26} />Obsidian 知識庫</button></div></section>
+    <section className="home-snapshot"><div><span className="eyebrow">今天的知識庫</span><h1>把學過的，<br /><em>變成用得上的。</em></h1></div><div className="snapshot-actions"><button onClick={() => setPage('chat')}><Search size={26} />知識搜尋 <b>快速找回</b></button><button onClick={() => setPage('courses')}><FolderOpen size={26} />課程庫 <b>{courseCount}</b></button><button onClick={() => setPage('inbox')}><Clock3 size={26} />處理紀錄 <b>{jobCount}</b></button><button onClick={() => setPage('obsidian')}><FileText size={26} />Obsidian 知識庫</button></div></section>
   </>
 }
 
 function PageHeader({ eyebrow, title, description, back }) { return <header className="page-header"><button className="back-button" onClick={back}><ArrowLeft size={25} />回到首頁</button><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></header> }
 
-function Inbox({ back, setPage }) {
+function Inbox({ back, setPage, jobs }) {
   return <section className="app-page"><PageHeader eyebrow="Codex 處理流程" title="處理紀錄" description="課程先下載到本機，由 Codex 整理；網站只同步已完成的知識結果，不重複上傳原始影音。" back={back} />
     <div className="notice"><Check size={25} />本機資料夾處理完成後，會同步清理逐字稿、筆記、提示詞與來源時間碼。</div>
     <div className="section-row"><h2>最近處理的課程</h2><button onClick={() => setPage('courses')}>查看課程庫 <ArrowRight size={22} /></button></div>
-    <div className="inbox-list">{inbox.map(item => { const Icon = item.icon; return <article key={item.name} className="inbox-item"><span className="item-icon"><Icon size={29} /></span><div><h3>{item.name}</h3><p>{item.meta}</p></div><strong className="status">{item.state}</strong><button aria-label={`查看 ${item.name}`}><ArrowRight size={25} /></button></article> })}</div>
+    <div className="inbox-list">{jobs.map(item => <article key={item.id} className="inbox-item"><span className="item-icon"><FileText size={29} /></span><div><h3>{item.status}</h3><p>{item.videoCount || 0} 部影片 · {item.pdfCount || 0} 份講義 · {item.captionCount || 0} 份字幕</p></div><strong className="status">已同步</strong><button aria-label="查看處理紀錄"><ArrowRight size={25} /></button></article>)}</div>
   </section>
 }
 
-function Courses({ back, setPage, setSelectedCourse }) {
-  const [active, setActive] = useState(courses[0])
+function Courses({ back, setPage, setSelectedCourse, courseList }) {
+  const [active, setActive] = useState(courseList[0] || emptyCourse)
+  useEffect(() => { if (courseList[0]) setActive(courseList[0]) }, [courseList])
   return <section className="app-page"><PageHeader eyebrow="你的學習地圖" title="課程庫" description="所有課程、單元、字幕、筆記與提示詞都保有清楚的來源關係。" back={back} />
     <div className="course-toolbar"><div><Search size={27} /><input placeholder="搜尋課程、概念或工具" /></div><button><Plus size={24} />新增課程</button></div>
-    <div className="course-grid">{courses.map(course => <button key={course.title} className={`course-card ${course.color} ${active.title === course.title ? 'selected' : ''}`} onClick={() => setActive(course)}><span>{course.type}</span><h2>{course.title}</h2><p>{course.lessons} · {course.progress}</p><ArrowRight size={25} /></button>)}</div>
+    <div className="course-grid">{courseList.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'} ${active.id === course.id ? 'selected' : ''}`} onClick={() => setActive(course)}><span>{course.category}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 部影片 · {course.processedCaptionCount || 0} 份字幕已整理</p><ArrowRight size={25} /></button>)}</div>
     <section className="course-detail"><div><span className="eyebrow">目前選取</span><h2>{active.title}</h2><p>從原始素材到可搜尋的完整逐字稿、課程筆記與可執行工作流，都集中在這裡。</p></div><div className="detail-actions"><button onClick={() => { setSelectedCourse(active); setPage('detail') }}><BookOpen size={25} />打開課程</button><button onClick={() => setPage('chat')}><Search size={25} />搜尋這門課</button></div></section>
   </section>
 }
 
-const units = [
-  { title: '4-0｜開營儀式', time: '64:03', status: '首輪筆記完成' },
-  { title: '4-1-6｜AI 互動視頻自動獲客', time: '字幕 3,757 段', status: '字幕已潤飾' },
-  { title: '4-4-4｜Seedance 2.5 商業化項目拆解', time: '字幕 3,457 段', status: '字幕已潤飾' },
-]
-
-function CourseDetail({ course, back, setPage }) {
-  const [unit, setUnit] = useState(units[0])
+function CourseDetail({ course, back, setPage, lessons }) {
+  const [unit, setUnit] = useState(lessons[0])
   const [tab, setTab] = useState('overview')
   const [copied, setCopied] = useState(false)
   const prompt = '以 [角色特徵] 為核心，維持人物臉部、髮型與服裝一致；鏡頭從 [起始畫面] 緩慢推進至 [最終畫面]，自然光線，電影感質地。'
   const copyPrompt = () => { navigator.clipboard?.writeText(prompt); setCopied(true); setTimeout(() => setCopied(false), 1600) }
-  return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.type} · ${course.lessons} · ${course.progress}`} back={back} />
-    <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>03 / 03</strong></div>{units.map(item => <button key={item.title} onClick={() => setUnit(item)} className={unit.title === item.title ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.time}</small></button>)}</aside>
+  useEffect(() => { if (lessons[0]) setUnit(lessons[0]) }, [lessons])
+  if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description="正在讀取單元資料…" back={back} /></section>
+  return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />
+    <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>{lessons.length.toString().padStart(2, '0')}</strong></div>{lessons.map(item => <button key={item.id} onClick={() => setUnit(item)} className={unit.id === item.id ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.duration}</small></button>)}</aside>
       <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.time}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
         <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>清理逐字稿</button><button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞</button><button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button></div>
         <AnimatePresence mode="wait"><motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lesson-content">
-          {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>這門開營儀式說明課程入口、資料包與學習方式，並建立 AI 影片創作、個人 IP 與商業專案三個學習脈絡。原始字幕與影片均保留，筆記中的結論都可回到時間碼確認。</p><div className="key-points"><span>本課已整理</span><ol><li>完整繁體字幕，保留全部 2,004 段時間碼。</li><li>學習流程、工具脈絡與版權提醒。</li><li>5 組可回查的來源時間範圍。</li></ol></div></>}
-          {tab === 'transcript' && <><h3>清理後逐字稿</h3><p className="transcript">這個網站僅展示同步後的知識索引。完整潤飾字幕已留在 Obsidian Vault；原始 VTT 不會被覆寫。</p><p className="transcript">目前已完成 3 份可回查字幕，合計 9,218 段，內嵌字幕影片仍待後續建立本機轉錄流程。</p></>}
+          {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>{unit.summary || '此單元正在等待本機處理結果同步。'}</p><div className="key-points"><span>本課已整理</span><ol><li>完整繁體字幕，保留全部 {unit.captionCues?.toLocaleString() || 0} 段時間碼。</li><li>原始字幕與清理版分開保留。</li><li>內容可回到來源時間碼確認。</li></ol></div></>}
+          {tab === 'transcript' && <><h3>清理後逐字稿</h3><p className="transcript">網站只保存同步後的知識索引；完整潤飾字幕留在 Obsidian Vault，原始 VTT 不會被覆寫。</p><p className="transcript">這個單元目前已同步 {unit.captionCues?.toLocaleString() || 0} 段字幕索引。</p></>}
           {tab === 'prompt' && <><h3>本課萃取的提示詞</h3><p>開營儀式未提供可直接複製的完整提示詞。後續會從實作單元擷取提示詞，並附上課程來源時間碼。</p></>}
-          {tab === 'sources' && <><h3>可回查來源</h3><div className="timeline"><button><time>00:02:25</time><span>開營定位、資料包與課程入口</span><Play size={20} /></button><button><time>00:10:00</time><span>AI 生成、提示詞與創作者參與</span><Play size={20} /></button><button><time>00:22:07</time><span>課程亮點、工具內容與商業變現</span><Play size={20} /></button><button><time>00:55:18</time><span>知識庫更新、Codex 加餐與競賽問答</span><Play size={20} /></button></div></>}
+          {tab === 'sources' && <><h3>可回查來源</h3><div className="timeline">{(unit.sourceTimeRanges || []).map(time => <button key={time}><time>{time}</time><span>已同步來源時間碼</span><Play size={20} /></button>)}{!unit.sourceTimeRanges?.length && <p>此單元尚未同步可回查的時間碼。</p>}</div></>}
         </motion.div></AnimatePresence>
         <footer><button onClick={() => setPage('chat')}><Search size={23} />搜尋這一課</button><button><FileUp size={23} />查看原始素材</button></footer>
       </article>
@@ -136,8 +126,30 @@ export function App() {
   const allowedEmail = 'aichi0121@gmail.com'
   const allowed = user?.email?.toLowerCase() === allowedEmail
   useEffect(() => onAuthStateChanged(auth, (nextUser) => { setUser(nextUser); setAuthReady(true) }), [])
-  const [selectedCourse, setSelectedCourse] = useState(courses[0])
+  const [courseList, setCourseList] = useState([])
+  const [jobs, setJobs] = useState([])
+  const [selectedCourse, setSelectedCourse] = useState(null)
+  const [lessons, setLessons] = useState([])
   const signIn = async () => { const result = await signInWithPopup(auth, new GoogleAuthProvider()); await setDoc(doc(db, 'users', result.user.uid), { displayName: result.user.displayName || 'Nexus 使用者', email: result.user.email || '', createdAt: serverTimestamp() }, { merge: true }) }
+  useEffect(() => {
+    if (!allowed) { setCourseList([]); setJobs([]); return }
+    const ownCourses = query(collection(db, 'courses'), where('ownerId', '==', user.uid))
+    const ownJobs = query(collection(db, 'processingJobs'), where('ownerId', '==', user.uid))
+    const stopCourses = onSnapshot(ownCourses, async (snapshot) => {
+      if (snapshot.empty) { await seedInitialNexusData(db, user); return }
+      const nextCourses = snapshot.docs.map(item => ({ id: item.id, ...item.data() }))
+      setCourseList(nextCourses)
+      setSelectedCourse(current => current && nextCourses.some(item => item.id === current.id) ? current : nextCourses[0])
+    })
+    const stopJobs = onSnapshot(ownJobs, snapshot => setJobs(snapshot.docs.map(item => ({ id: item.id, ...item.data() }))))
+    return () => { stopCourses(); stopJobs() }
+  }, [allowed, user])
+  useEffect(() => {
+    if (!selectedCourse?.id) { setLessons([]); return }
+    return onSnapshot(collection(db, 'courses', selectedCourse.id, 'lessons'), snapshot => {
+      setLessons(snapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort((a, b) => (a.sequence || 0) - (b.sequence || 0)))
+    })
+  }, [selectedCourse?.id])
   if (!allowed) return <LoginGate user={user} ready={authReady} allowed={allowed} signIn={signIn} />
-  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && <CourseDetail course={selectedCourse} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
+  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
 }
