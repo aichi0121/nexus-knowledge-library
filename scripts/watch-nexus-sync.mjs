@@ -16,10 +16,12 @@ function sync() {
 }
 
 watch(vault, { recursive: true }, (_, changed) => {
-  if (!changed?.endsWith('_字幕潤飾版.vtt')) return
+  const isTranscript = changed?.endsWith('_字幕潤飾版.vtt')
+  const isLessonNote = changed?.includes('01｜單元筆記') && changed.endsWith('.md')
+  if (!isTranscript && !isLessonNote) return
   clearTimeout(timer)
   timer = setTimeout(sync, 2500)
 })
 
-console.log('Nexus 自動同步已啟動，等待字幕潤飾版變更。')
+console.log('Nexus 自動同步已啟動，等待字幕潤飾版或單元筆記變更。')
 sync()

@@ -16,6 +16,58 @@ const knownLessons = new Map([
 const hash = value => createHash('sha1').update(value).digest('hex').slice(0, 16)
 const timeToSeconds = value => { const [h, m, s] = value.replace(',', '.').split(':'); return Number(h) * 3600 + Number(m) * 60 + Number(s) }
 const slug = value => knownLessons.get(value) || `lesson-${hash(value)}`
+const stripMarkdown = value => value
+  .replace(/`([^`]+)`/g, '$1')
+  .replace(/\*\*([^*]+)\*\*/g, '$1')
+  .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  .replace(/<[^>]+>/g, '')
+  .trim()
+
+function section(markdown, heading) {
+  const escaped = heading.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')
+  const start = new RegExp(`^##\\s+${escaped}\\s*$`, 'm').exec(markdown)
+  if (!start) return ''
+  const bodyStart = start.index + start[0].length
+  const remainder = markdown.slice(bodyStart)
+  const nextHeading = /^##\s+/m.exec(remainder)
+  return (nextHeading ? remainder.slice(0, nextHeading.index) : remainder).trim()
+}
+
+function useful(value) {
+  const text = stripMarkdown(value).replace(/^[-*\d.\s]+/, '').trim()
+  return Boolean(text) && !/^(待|無|沒有|本堂未提供|請從|避免僅)/.test(text)
+}
+
+function listFrom(sectionText) {
+  return sectionText
+    .split('\n')
+    .map(line => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, '').trim())
+    .map(stripMarkdown)
+    .filter(useful)
+}
+
+function lessonFromNote(path) {
+  const markdown = readFileSync(path, 'utf8').replace(/\r/g, '')
+  const title = stripMarkdown(markdown.match(/^#\s+(.+)$/m)?.[1] || path.split('/').at(-1).replace(/\.md$/, ''))
+  const filename = path.split('/').at(-1).replace(/\.md$/, '')
+  const tools = listFrom(section(markdown, '工具／應用程式'))
+  const steps = listFrom(section(markdown, '實作步驟'))
+  const summary = stripMarkdown(section(markdown, '這一課在教什麼？'))
+  const prompts = section(markdown, '提示詞')
+  const source = section(markdown, '來源時間碼')
+  const sourceTimeRanges = [...source.matchAll(/\d{2}:\d{2}:\d{2}\s*(?:–|—|-)\s*\d{2}:\d{2}:\d{2}/g)].map(match => match[0].replace(/\s+/g, ''))
+  const status = markdown.match(/^status:\s*(.+)$/m)?.[1]?.trim()
+  return {
+    id: slug(filename),
+    title,
+    ...(useful(summary) ? { summary } : {}),
+    ...(tools.length ? { tools } : {}),
+    ...(steps.length ? { steps } : {}),
+    ...(sourceTimeRanges.length ? { sourceTimeRanges } : {}),
+    ...(useful(prompts) ? { prompts: listFrom(prompts) } : {}),
+    ...(status ? { status } : {}),
+  }
+}
 
 function cues(path) {
   const lines = readFileSync(path, 'utf8').replace(/\r/g, '').split('\n')
@@ -51,24 +103,40 @@ function metadata(folder) {
 
 async function syncCourse(db, ownerId, folder, dryRun) {
   const transcriptFolder = join(folder, '02｜清理逐字稿')
-  if (!existsSync(transcriptFolder)) return 0
-  const files = readdirSync(transcriptFolder).filter(name => name.endsWith('_字幕潤飾版.vtt'))
-  if (!files.length) return 0
+  const notesFolder = join(folder, '01｜單元筆記')
+  const files = existsSync(transcriptFolder) ? readdirSync(transcriptFolder).filter(name => name.endsWith('_字幕潤飾版.vtt')) : []
+  const noteFiles = existsSync(notesFolder) ? readdirSync(notesFolder).filter(name => name.endsWith('.md')) : []
+  if (!files.length && !noteFiles.length) return { segments: 0, notes: 0 }
   const course = metadata(folder)
   const records = files.flatMap(file => {
     const name = file.replace(/_字幕潤飾版\.vtt$/, '')
     const lessonId = slug(name)
     return segments(join(transcriptFolder, file)).map((segment, index) => ({ id: `${lessonId}-${String(index + 1).padStart(4, '0')}`, lessonId, sourceCaptionPath: file, tags: [course.category], ...segment }))
   })
-  console.log(`${course.title}：${records.length} 個段落`)
-  if (dryRun) return records.length
+  const lessons = noteFiles.map(file => ({ ...lessonFromNote(join(notesFolder, file)), obsidianPath: `01｜單元筆記/${file}` }))
+  console.log(`${course.title}：${records.length} 個段落、${lessons.length} 則單元筆記`)
+  if (dryRun) return { segments: records.length, notes: lessons.length }
   for (let i = 0; i < records.length; i += 400) {
     const batch = db.batch()
     records.slice(i, i + 400).forEach(record => batch.set(db.doc(`courses/${course.id}/transcriptSegments/${record.id}`), { ...record, ownerId, updatedAt: FieldValue.serverTimestamp() }, { merge: true }))
     await batch.commit()
   }
-  await db.doc(`courses/${course.id}`).set({ ownerId, title: course.title, category: course.category, transcriptSegmentCount: records.length, transcriptIndexedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
-  return records.length
+  for (const lesson of lessons) {
+    await db.doc(`courses/${course.id}/lessons/${lesson.id}`).set({ ...lesson, ownerId, syncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+  }
+  const existingLessons = await db.collection(`courses/${course.id}/lessons`).get()
+  const desiredByPath = new Map(lessons.map(lesson => [lesson.obsidianPath, lesson.id]))
+  const legacyNotes = existingLessons.docs.filter(doc => {
+    const desiredId = desiredByPath.get(doc.data().obsidianPath)
+    return desiredId && desiredId !== doc.id
+  })
+  if (legacyNotes.length) {
+    const batch = db.batch()
+    legacyNotes.forEach(doc => batch.delete(doc.ref))
+    await batch.commit()
+  }
+  await db.doc(`courses/${course.id}`).set({ ownerId, title: course.title, category: course.category, transcriptSegmentCount: records.length, noteCount: lessons.length, transcriptIndexedAt: FieldValue.serverTimestamp(), notesSyncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+  return { segments: records.length, notes: lessons.length }
 }
 
 async function main() {
@@ -78,9 +146,14 @@ async function main() {
   const users = await db.collection('users').where('email', '==', 'aichi0121@gmail.com').limit(1).get()
   if (users.empty) throw new Error('找不到 Nexus 使用者，請先登入網站一次。')
   const folders = readdirSync(vaultCourses, { withFileTypes: true }).filter(item => item.isDirectory()).map(item => join(vaultCourses, item.name))
-  let total = 0
-  for (const folder of folders) total += await syncCourse(db, users.docs[0].id, folder, dryRun)
-  console.log(`${dryRun ? '預覽' : '完成'}：共 ${total} 個逐字稿段落。`)
+  let totalSegments = 0
+  let totalNotes = 0
+  for (const folder of folders) {
+    const result = await syncCourse(db, users.docs[0].id, folder, dryRun)
+    totalSegments += result.segments
+    totalNotes += result.notes
+  }
+  console.log(`${dryRun ? '預覽' : '完成'}：共 ${totalSegments} 個逐字稿段落、${totalNotes} 則單元筆記。`)
 }
 
 main().catch(error => { console.error(`同步失敗：${error.message}`); process.exitCode = 1 })
