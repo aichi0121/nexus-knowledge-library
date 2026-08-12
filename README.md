@@ -28,6 +28,16 @@ npm run build
 npm run test:sites
 ```
 
+## 新課程一鍵入庫
+
+將「已完成字幕潤飾」的課程資料夾放入 Nexus Obsidian Vault 的 `02｜課程庫` 後，執行：
+
+```bash
+npm run course:prepare -- "/Users/zhengweizhi/Documents/Nexus Obsidian Vault/02｜課程庫/你的課程資料夾"
+```
+
+它只會補上缺少的課程總覽與單元筆記範本，不會覆寫既有筆記；接著會同步課程、筆記、工具／方法、實作步驟和字幕索引到 Nexus 網站。日後直接編輯單元筆記或字幕潤飾版，背景同步器會自動更新網站。
+
 ## Firebase 設定
 
 專案已使用 Firebase Authentication（Google）與 Firestore。若換成新的正式網站網址，請在 Firebase Console 的：

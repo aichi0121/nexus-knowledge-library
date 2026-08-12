@@ -18,7 +18,8 @@ function sync() {
 watch(vault, { recursive: true }, (_, changed) => {
   const isTranscript = changed?.endsWith('_字幕潤飾版.vtt')
   const isLessonNote = changed?.includes('01｜單元筆記') && changed.endsWith('.md')
-  if (!isTranscript && !isLessonNote) return
+  const isCourseOverview = changed?.endsWith('00｜課程總覽.md')
+  if (!isTranscript && !isLessonNote && !isCourseOverview) return
   clearTimeout(timer)
   timer = setTimeout(sync, 2500)
 })

@@ -46,11 +46,15 @@ function listFrom(sectionText) {
     .filter(useful)
 }
 
+function firstSection(markdown, headings) {
+  return headings.map(heading => section(markdown, heading)).find(Boolean) || ''
+}
+
 function lessonFromNote(path) {
   const markdown = readFileSync(path, 'utf8').replace(/\r/g, '')
   const title = stripMarkdown(markdown.match(/^#\s+(.+)$/m)?.[1] || path.split('/').at(-1).replace(/\.md$/, ''))
   const filename = path.split('/').at(-1).replace(/\.md$/, '')
-  const tools = listFrom(section(markdown, '工具／應用程式'))
+  const tools = listFrom(firstSection(markdown, ['工具／應用程式', '工具／方法', '工具與方法']))
   const steps = listFrom(section(markdown, '實作步驟'))
   const summary = stripMarkdown(section(markdown, '這一課在教什麼？'))
   const prompts = section(markdown, '提示詞')
@@ -97,7 +101,7 @@ function metadata(folder) {
   const text = existsSync(overview) ? readFileSync(overview, 'utf8') : ''
   const title = text.match(/^#\s+(.+)$/m)?.[1] || folder.split('/').at(-1)
   const category = text.match(/^domain:\s*(.+)$/m)?.[1] || '未分類'
-  const id = title.startsWith('193｜（墨夏班）AI影片創作0-1實戰營') ? 'ai-video-creation-193' : `course-${hash(folder)}`
+  const id = title.startsWith('193｜（墨夏班）AI影片創作0-1實戰營') ? 'ai-video-creation-193' : `course-${hash(title)}`
   return { id, title, category }
 }
 
