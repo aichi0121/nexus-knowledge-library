@@ -46,13 +46,30 @@ function inventory(folder, location) {
 const folders = [
   ...[vaultCourses, pendingCourses].flatMap(root => existsSync(root) ? readdirSync(root, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => ({ folder: join(root, entry.name), location: root === vaultCourses ? '已入庫' : '待處理' })) : []),
 ]
-const uniqueMap = new Map()
+const grouped = new Map()
 for (const item of folders) {
   const name = item.folder.split('/').at(-1)
-  if (!uniqueMap.has(name)) uniqueMap.set(name, item)
+  const group = grouped.get(name) || []
+  group.push(item)
+  grouped.set(name, group)
 }
-const unique = [...uniqueMap.values()]
-const records = unique.map(item => inventory(item.folder, item.location))
+const records = [...grouped.values()].map(group => {
+  const parts = group.map(item => inventory(item.folder, item.location))
+  const primary = parts.find(item => item.sourceLocation === '已入庫') || parts[0]
+  const rawCaptionCount = Math.max(...parts.map(item => item.rawCaptionCount))
+  const processedCaptionCount = Math.max(...parts.map(item => item.processedCaptionCount))
+  const noteCount = Math.max(...parts.map(item => item.noteCount))
+  return {
+    ...primary,
+    sourceLocation: parts.map(item => item.sourceLocation).join('／'),
+    sourcePath: parts.map(item => item.sourcePath),
+    rawCaptionCount,
+    processedCaptionCount,
+    noteCount,
+    lessonCount: Math.max(...parts.map(item => item.lessonCount)),
+    inventoryState: noteCount ? '有筆記' : processedCaptionCount ? '字幕已整理' : rawCaptionCount ? '待整理' : '無字幕',
+  }
+})
 console.log(records.map(record => `${record.title}｜${record.category}｜${record.inventoryState}｜原始字幕 ${record.rawCaptionCount}｜已整理字幕 ${record.processedCaptionCount}｜筆記 ${record.noteCount}`).join('\n'))
 if (dryRun) { console.log(`預覽：${records.length} 門課。`); process.exit(0) }
 
