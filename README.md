@@ -48,6 +48,14 @@ npm run courses:inventory
 
 會讀取「Nexus Obsidian Vault／02-課程庫」與「Nexus 待處理課程」兩處的資料夾，只同步課程名稱、領域、原始／已整理字幕數量、筆記與講義數量到網站；不會搬移、上傳或修改任何原始課程檔案。
 
+## 86 課程批次入庫
+
+```bash
+npm run course:import-bazi
+```
+
+此流程會為 86 課程的每份原始 VTT 建立獨立的潤飾版、在 Obsidian 建立可回查的字幕導讀筆記，並將潤飾版以本機連結放入入庫結構；原始字幕與原始課程資料維持在待處理資料夾不變。
+
 ## Firebase 設定
 
 專案已使用 Firebase Authentication（Google）與 Firestore。若換成新的正式網站網址，請在 Firebase Console 的：

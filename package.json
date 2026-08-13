@@ -11,7 +11,8 @@
     "course:prepare": "node scripts/prepare-course-for-nexus.mjs",
     "notes:draft": "node scripts/generate-lesson-note-drafts.mjs",
     "courses:inventory": "node scripts/inventory-course-library.mjs",
-    "vtt:polish-pilot": "node scripts/polish-vtt-pilot.mjs"
+    "vtt:polish-pilot": "node scripts/polish-vtt-pilot.mjs",
+    "course:import-bazi": "node scripts/import-bazi-course-batch.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "5.0.4",
