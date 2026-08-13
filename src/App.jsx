@@ -83,7 +83,7 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId }) {
   </section>
 }
 
-function Chat({ back, setPage, courseList, lessons, selectedCourse, openResult }) {
+function Chat({ back, setPage, courseList, openResult }) {
   const [question, setQuestion] = useState('')
   const [searching, setSearching] = useState(false)
   const [messages, setMessages] = useState([{ who: 'ai', text: '輸入關鍵字、工具名稱或課程概念，我會找出完整逐字稿、筆記、提示詞與對應來源。' }])
@@ -92,22 +92,31 @@ function Chat({ back, setPage, courseList, lessons, selectedCourse, openResult }
     if (!text) return
     setSearching(true)
     const terms = text.toLowerCase().split(/\s+/).filter(Boolean)
-    const matches = [...courseList.map(course => ({ type: '課程', title: course.title, detail: [course.category, ...(course.tags || [])].join(' · '), source: '課程總覽', courseId: course.id })), ...lessons.map(lesson => ({ type: '單元', title: lesson.title, detail: lesson.summary || lesson.status, source: lesson.sourceTimeRanges?.[0] || '單元筆記', courseId: selectedCourse?.id, lessonId: lesson.id }))].filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term))).slice(0, 6)
-    let transcriptMatches = []
-    if (selectedCourse?.id) {
-      const snapshot = await getDocs(collection(db, 'courses', selectedCourse.id, 'transcriptSegments'))
-      transcriptMatches = snapshot.docs.map(item => item.data()).filter(segment => terms.every(term => segment.cleanText.toLowerCase().includes(term))).slice(0, 3)
-    }
-    transcriptMatches.forEach(segment => matches.push({ type: '逐字稿片段', title: `${segment.startTime}–${segment.endTime}`, detail: segment.cleanText.length > 150 ? `${segment.cleanText.slice(0, 150)}…` : segment.cleanText, source: `${selectedCourse.title} · ${segment.startTime}`, courseId: selectedCourse.id, lessonId: segment.lessonId, sourceTime: segment.startTime }))
-    const answer = matches.length
-      ? `找到 ${matches.length} 筆相關資料：\n${matches.map(item => `・${item.type}｜${item.title}\n  ${item.detail}`).join('\n')}`
-      : '目前找不到完全相符的索引。可以改用課程名稱、工具名稱、標籤或單元名稱搜尋；完整逐字稿片段會在下一階段同步後加入搜尋。'
-    setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: answer, source: matches.map(item => item.source).join(' · '), results: matches }])
-    setQuestion('')
-    setSearching(false)
+    try {
+      const courseMatches = courseList.map(course => ({ type: '課程', title: course.title, detail: [course.category, ...(course.tags || [])].join(' · '), source: '課程總覽', courseId: course.id })).filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term)))
+      const courseIndexes = (await Promise.all(courseList.map(async course => {
+        const [lessonSnapshot, transcriptSnapshot] = await Promise.all([
+          getDocs(collection(db, 'courses', course.id, 'lessons')),
+          getDocs(collection(db, 'courses', course.id, 'transcriptSegments')),
+        ])
+        return { courseId: course.id, lessons: lessonSnapshot.docs.map(item => ({ id: item.id, ...item.data() })), transcripts: transcriptSnapshot.docs.map(item => item.data()) }
+      }))).reduce((all, item) => ({ lessons: [...all.lessons, ...item.lessons.map(lesson => ({ ...lesson, courseId: item.courseId }))], transcripts: [...all.transcripts, ...item.transcripts.map(segment => ({ ...segment, courseId: item.courseId }))] }), { lessons: [], transcripts: [] })
+      const lessonMatches = courseIndexes.lessons
+        .filter(lesson => terms.every(term => `${lesson.title} ${lesson.summary || ''} ${(lesson.tools || []).join(' ')} ${(lesson.steps || []).join(' ')}`.toLowerCase().includes(term)))
+        .map(lesson => ({ type: '單元筆記', title: lesson.title, detail: lesson.summary || lesson.status, source: `${courseList.find(course => course.id === lesson.courseId)?.title || '課程'} · ${lesson.sourceReferences?.[0]?.time || '單元筆記'}`, courseId: lesson.courseId, lessonId: lesson.id }))
+      const transcriptMatches = courseIndexes.transcripts
+        .filter(segment => terms.every(term => segment.cleanText.toLowerCase().includes(term))).slice(0, 6)
+        .map(segment => ({ type: '逐字稿片段', title: `${segment.startTime}–${segment.endTime}`, detail: segment.cleanText.length > 150 ? `${segment.cleanText.slice(0, 150)}…` : segment.cleanText, source: `${courseList.find(course => course.id === segment.courseId)?.title || '課程'} · ${segment.startTime}`, courseId: segment.courseId, lessonId: segment.lessonId, sourceTime: segment.startTime }))
+      const matches = [...courseMatches, ...lessonMatches, ...transcriptMatches].slice(0, 8)
+      const answer = matches.length ? `已搜尋全部 ${courseList.length} 門已入庫課程，找到 ${matches.length} 筆相關資料：\n${matches.map(item => `・${item.type}｜${item.title}\n  ${item.detail}`).join('\n')}` : '已搜尋全部已入庫課程，但找不到完全相符的索引。可改用課程名稱、概念、工具或字幕中的關鍵字。'
+      setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: answer, source: matches.map(item => item.source).join(' · '), results: matches }])
+      setQuestion('')
+    } catch {
+      setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: '跨課程搜尋暫時無法讀取索引，請重新整理後再試。' }])
+    } finally { setSearching(false) }
   }
-  return <section className="app-page chat-page"><PageHeader eyebrow="不使用 AI API" title="知識搜尋" description="以課程、逐字稿、筆記、提示詞與來源時間碼做全文搜尋；每個結果都能回到原課內容。" back={back} />
-    <div className="chat-layout"><aside><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('互動視頻')}>互動視頻</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.results?.map(result => <button className="search-result" key={`${result.type}-${result.title}-${result.source}`} onClick={() => openResult(result)}><span>{result.type}</span><b>{result.title}</b><small>{result.source}</small><ArrowRight size={17} /></button>)}{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋課程、標籤、工具或逐字稿內容⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
+  return <section className="app-page chat-page"><PageHeader eyebrow="跨課程全文搜尋" title="知識搜尋" description="一次搜尋所有已入庫課程的筆記與逐字稿；每個結果都能回到對應課程與單元。" back={back} />
+    <div className="chat-layout"><aside><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('八字')}>八字</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.results?.map(result => <button className="search-result" key={`${result.type}-${result.title}-${result.source}`} onClick={() => openResult(result)}><span>{result.type}</span><b>{result.title}</b><small>{result.source}</small><ArrowRight size={17} /></button>)}{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋所有課程的筆記、概念、工具或逐字稿內容⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
   </section>
 }
 
@@ -184,5 +193,5 @@ export function App() {
     setPage('detail')
   }
   if (!allowed) return <LoginGate user={user} ready={authReady} allowed={allowed} signIn={signIn} />
-  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} courseList={courseList} lessons={lessons} selectedCourse={selectedCourse} openResult={openSearchResult} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} initialLessonId={selectedLessonId} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
+  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} courseList={courseList} openResult={openSearchResult} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} initialLessonId={selectedLessonId} back={() => setPage('courses')} setPage={setPage} />}</motion.div>}</AnimatePresence></main>
 }
