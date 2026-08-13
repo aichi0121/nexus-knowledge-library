@@ -118,6 +118,7 @@
 .timeline-item { border: 1px solid rgba(229,225,207,.18); border-radius: 14px; background: #1e1e1e; color: #e5e1cf; padding: 14px 16px; display: grid; grid-template-columns: 160px 1fr; gap: 14px; align-items: center; font-size: 15px; line-height: 1.55; }
 .timeline-item time { color: #c6a16a; font-size: 13px; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; }
 .source-explainer { margin: -6px 0 20px; color: #aaa392; font-size: 15px; }
+.lesson-edit-actions { display: flex; justify-content: flex-end; padding: 10px 22px 0; }.lesson-edit-actions button,.lesson-editor button { border: 1px solid rgba(229,225,207,.22); border-radius: 999px; background: #1c1c1c; color: #e5e1cf; padding: 8px 12px; font-size: 14px; }.lesson-editor { display: grid; gap: 14px; margin: 18px 36px 0; padding: 20px; border: 1px solid rgba(198,161,106,.35); border-radius: 14px; background: #191816; }.lesson-editor label { display: grid; gap: 7px; color: #d8bb8e; font-size: 14px; }.lesson-editor textarea { min-height: 92px; resize: vertical; border: 1px solid rgba(229,225,207,.22); border-radius: 10px; padding: 10px; background: #101010; color: #e5e1cf; font: inherit; font-size: 15px; line-height: 1.55; }.lesson-editor button { justify-self: start; background: #e5e1cf; color: #111; font-weight: 700; }
 @media (max-width: 760px) {
   .course-toolbar { display: flex; align-items: center; flex-wrap: wrap; }
   .course-toolbar > div { min-width: 0; }
@@ -129,4 +130,5 @@
   .course-card h2 { font-size: 20px; margin-top: 12px; }
   .timeline-item { grid-template-columns: 132px minmax(0,1fr); gap: 10px; padding: 12px; font-size: 14px; }
   .timeline-item time { font-size: 12px; }
+  .lesson-editor { margin: 16px 22px 0; padding: 16px; }
 }
