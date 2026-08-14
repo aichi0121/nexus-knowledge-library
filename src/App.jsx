@@ -10,6 +10,8 @@ const emptyCourse = { title: '尚未同步課程', category: '等待同步', les
 const courseCategory = course => course.manualCategory || course.category || '待分類'
 const courseTags = course => course.manualTags || course.tags || []
 const courseState = course => course.manualInventoryState || course.inventoryState || (course.noteCount ? '有筆記' : course.processedCaptionCount ? '字幕已整理' : course.rawCaptionCount ? '待整理' : '無字幕')
+const lessonOrder = lesson => (lesson.title.match(/^\d+(?:-\d+)*/) || ['999'])[0].split('-').map(value => Number(value))
+const compareLessons = (a, b) => { const left = lessonOrder(a); const right = lessonOrder(b); for (let index = 0; index < Math.max(left.length, right.length); index += 1) { const result = (left[index] ?? -1) - (right[index] ?? -1); if (result) return result } return a.title.localeCompare(b.title, 'zh-Hant') }
 
 function Nav({ page, setPage }) {
   return <nav className="app-nav" aria-label="主導覽">
@@ -90,13 +92,13 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId, user })
   return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${courseCategory(course)} · ${courseState(course)} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />{courseEditor}
     <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>{lessons.length.toString().padStart(2, '0')}</strong></div>{lessons.map(item => <button key={item.id} onClick={() => setUnit(item)} className={unit.id === item.id ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.duration}</small></button>)}</aside>
       <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.duration}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
-        <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{(unit.tools?.length || unit.steps?.length) > 0 && <button className={tab === 'methods' ? 'active' : ''} onClick={() => setTab('methods')}>工具與方法</button>}{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}{unit.sourceReferences?.length > 0 && <button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button>}</div>
+        <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{(unit.concepts?.length || unit.tools?.length || unit.steps?.length) > 0 && <button className={tab === 'methods' ? 'active' : ''} onClick={() => setTab('methods')}>概念與方法</button>}{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}{unit.sourceReferences?.length > 0 && <button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>重點時間碼</button>}</div>
         <div className="lesson-edit-actions"><button onClick={() => setEditing(value => !value)}>{editing ? '取消編輯' : '編輯本課筆記'}</button></div>{editing && <div className="lesson-editor"><label>本課摘要<textarea value={draft.summary} onChange={event => setDraft({ ...draft, summary: event.target.value })} /></label><label>工具／方法（每行一項）<textarea value={draft.tools} onChange={event => setDraft({ ...draft, tools: event.target.value })} /></label><label>學習步驟（每行一項）<textarea value={draft.steps} onChange={event => setDraft({ ...draft, steps: event.target.value })} /></label><button onClick={saveNote} disabled={saving}>{saving ? '儲存中…' : '儲存並同步至 Obsidian'}</button></div>}
         <AnimatePresence mode="wait"><motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="lesson-content">
-          {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>{unit.summary || '此單元正在等待本機處理結果同步。'}</p><div className="key-points"><span>本課已整理</span><ol><li>完整繁體字幕，保留全部 {unit.captionCues?.toLocaleString() || 0} 段時間碼。</li><li>原始字幕與清理版分開保留。</li><li>內容可回到來源時間碼確認。</li></ol></div></>}
-          {tab === 'methods' && <><h3>工具與方法</h3>{unit.tools?.length > 0 && <div className="key-points"><span>相關工具</span><div className="tool-chips">{unit.tools.map(tool => <b key={tool}>{tool}</b>)}</div></div>}{unit.steps?.length > 0 && <div className="key-points"><span>實作步驟</span><ol>{unit.steps.map(step => <li key={step}>{step}</li>)}</ol></div>}</>}
+          {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>{unit.summary || '此單元正在等待本機處理結果同步。'}</p>{unit.keyPoints?.length > 0 && <div className="key-points"><span>本課重點</span><ol>{unit.keyPoints.map(point => <li key={point}>{point}</li>)}</ol></div>}</>}
+          {tab === 'methods' && <><h3>概念與方法</h3>{unit.concepts?.length > 0 && <div className="key-points"><span>本課關鍵概念</span><ol>{unit.concepts.map(concept => <li key={concept}>{concept}</li>)}</ol></div>}{unit.tools?.length > 0 && <div className="key-points"><span>實際使用的工具</span><div className="tool-chips">{unit.tools.map(tool => <b key={tool}>{tool}</b>)}</div></div>}{unit.steps?.length > 0 && <div className="key-points"><span>學習／操作方法</span><ol>{unit.steps.map(step => <li key={step}>{step}</li>)}</ol></div>}</>}
           {tab === 'prompt' && <><h3>提示詞與工作流</h3>{unit.prompts.map(item => <div className="prompt-block" key={item.title}><strong>{item.title}</strong><code>{item.content}</code></div>)}</>}
-          {tab === 'sources' && <><h3>可回查來源</h3><p className="source-explainer">每一段都附上筆記說明；點選後可改用「搜尋這一課」回到相關逐字稿。</p><div className="timeline">{(unit.sourceReferences || []).map(reference => <div key={reference.time} className="timeline-item"><time>{reference.time}</time><span>{reference.note}</span></div>)}</div></>}
+          {tab === 'sources' && <><h3>重點對應時間碼</h3><p className="source-explainer">每一段都對應本課的一項重點；可用「搜尋這一課」回到完整字幕查看上下文。</p><div className="timeline">{(unit.sourceReferences || []).map(reference => <div key={reference.time} className="timeline-item"><time>{reference.time}</time><span>{reference.note}</span></div>)}</div></>}
         </motion.div></AnimatePresence>
         <footer><button onClick={() => setPage('chat')}><Search size={23} />搜尋這一課</button></footer>
       </article>
@@ -204,7 +206,7 @@ export function App() {
   useEffect(() => {
     if (!selectedCourse?.id) { setLessons([]); return }
     return onSnapshot(collection(db, 'courses', selectedCourse.id, 'lessons'), snapshot => {
-      setLessons(snapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort((a, b) => (a.sequence || 0) - (b.sequence || 0)))
+      setLessons(snapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort(compareLessons))
     })
   }, [selectedCourse?.id])
   const openSearchResult = (result) => {

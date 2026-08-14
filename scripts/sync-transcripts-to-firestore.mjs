@@ -55,7 +55,9 @@ function lessonFromNote(path) {
   const title = stripMarkdown(markdown.match(/^#\s+(.+)$/m)?.[1] || path.split('/').at(-1).replace(/\.md$/, ''))
   const filename = path.split('/').at(-1).replace(/\.md$/, '')
   const tools = listFrom(firstSection(markdown, ['工具／應用程式', '工具／方法', '工具與方法']))
+  const concepts = listFrom(firstSection(markdown, ['關鍵概念', '核心概念']))
   const steps = listFrom(section(markdown, '實作步驟'))
+  const keyPoints = listFrom(firstSection(markdown, ['重點整理', '本課重點']))
   const summary = stripMarkdown(section(markdown, '這一課在教什麼？'))
   const prompts = section(markdown, '提示詞')
   const source = section(markdown, '來源時間碼')
@@ -72,6 +74,8 @@ function lessonFromNote(path) {
     title,
     ...(useful(summary) ? { summary } : {}),
     ...(tools.length ? { tools } : {}),
+    ...(concepts.length ? { concepts } : {}),
+    ...(keyPoints.length ? { keyPoints } : {}),
     ...(steps.length ? { steps } : {}),
     ...(sourceTimeRanges.length ? { sourceTimeRanges, sourceReferences } : {}),
     ...(useful(prompts) ? { prompts: listFrom(prompts) } : {}),
