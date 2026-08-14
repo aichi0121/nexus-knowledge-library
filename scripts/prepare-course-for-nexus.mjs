@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
@@ -45,16 +44,13 @@ create(overviewPath, `---\ndomain: ${category}\nstatus: 處理中\n---\n\n# ${ti
 
 for (const name of noteNames) {
   const notePath = join(notesFolder, `${name}.md`)
-  create(notePath, `---\ncourse: ${title}\nstatus: 待整理\n---\n\n# ${name}\n\n## 這一課在教什麼？\n\n待從已潤飾字幕整理本課重點。\n\n## 實作步驟\n\n- 待從已潤飾字幕整理。\n\n## 工具／應用程式\n\n- 待從已潤飾字幕整理。\n\n## 提示詞\n\n本堂未提供可直接複製的完整提示詞。\n\n## 來源時間碼\n\n- 待從已潤飾字幕補上。\n`, '單元筆記')
+  create(notePath, `---\ntype: lesson-note\ncourse: ${title}\nsource_caption: ${name}_字幕潤飾版.vtt\nstatus: 待內容理解\nnote_quality: pending\n---\n\n# ${name}\n\n## 一句話結論\n\n> 先完整閱讀字幕後，以自己的話寫出講者真正要你理解或做到的事；不要貼逐字稿。\n\n## 重點整理\n\n- 重點 1：結論或判讀原則（20～120 字）。\n- 重點 2：適用條件、例外或前提。\n- 重點 3：可採取的理解／操作方式。\n\n## 適用條件／限制\n\n- 說明這一課的結論在什麼條件下成立；若是健康、財務或命理內容，標示為講者觀點並保留專業判斷界線。\n\n## 概念與方法\n\n- 概念：用自己的話定義課內真正重要的術語。\n- 方法：列出講者實際教的判讀或操作順序；沒有就寫「本課沒有獨立操作方法」。\n\n## 工具／應用程式\n\n- 只列實際使用的軟體、網站、表格或教具；概念詞不能放在這裡。\n\n## 可立即行動\n\n1. 把課內方法轉成可驗證的下一步。\n\n## 來源時間碼\n\n- \`00:00:00–00:00:00\`：用一句完整摘要說明這段為何是重點；不要貼字幕原文。\n`, '單元筆記')
 }
 
 if (!noteNames.length) console.log('尚未找到「*_字幕潤飾版.vtt」，已建立課程總覽；字幕完成後再執行一次即可建立單元筆記。')
 
 if (!dryRun && !skipSync) {
-  console.log('建立可校對的單元筆記初稿…')
-  execFileSync(process.execPath, ['scripts/generate-lesson-note-drafts.mjs', courseFolder], { cwd: projectRoot, stdio: 'inherit' })
-  console.log('開始同步到 Nexus 網站…')
-  execFileSync(process.execPath, ['scripts/sync-transcripts-to-firestore.mjs'], { cwd: projectRoot, stdio: 'inherit' })
+  console.log('筆記範本已建立。完成內容理解與品質檢查後，才會同步到 Nexus 網站。')
 }
 
 console.log(dryRun ? '預覽完成，尚未建立或同步任何檔案。' : '課程已準備完成。')

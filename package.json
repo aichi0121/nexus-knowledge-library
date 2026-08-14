@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "course:prepare": "node scripts/prepare-course-for-nexus.mjs",
+    "notes:validate": "node scripts/validate-obsidian-notes.mjs",
     "notes:draft": "node scripts/generate-lesson-note-drafts.mjs",
     "courses:inventory": "node scripts/inventory-course-library.mjs",
     "vtt:polish-pilot": "node scripts/polish-vtt-pilot.mjs",

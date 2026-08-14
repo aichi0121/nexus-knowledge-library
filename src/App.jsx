@@ -88,7 +88,7 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId, user })
     try { await setDoc(doc(db, 'courses', course.id), { ownerId: user.uid, manualCategory: courseDraft.category.trim() || course.category || '待分類', manualTags: courseDraft.tags.split(/[、,，\n]/).map(item => item.trim()).filter(Boolean), manualInventoryState: courseDraft.state, manualUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true }); setCourseEditing(false) } finally { setCourseSaving(false) }
   }
   const courseEditor = <div className="course-management"><button className="course-management-toggle" onClick={() => setCourseEditing(value => !value)}>{courseEditing ? '取消分類調整' : '調整分類與狀態'}</button>{courseEditing && <div className="course-editor"><label>領域<input value={courseDraft.category} onChange={event => setCourseDraft({ ...courseDraft, category: event.target.value })} placeholder="例如：命理｜人生規劃" /></label><label>標籤（以頓號或逗號分隔）<input value={courseDraft.tags} onChange={event => setCourseDraft({ ...courseDraft, tags: event.target.value })} placeholder="例如：八字、五行、人生規劃" /></label><label>處理狀態<select value={courseDraft.state} onChange={event => setCourseDraft({ ...courseDraft, state: event.target.value })}>{['有筆記', '字幕已整理', '待整理', '無字幕'].map(item => <option key={item}>{item}</option>)}</select></label><button onClick={saveCourse} disabled={courseSaving}>{courseSaving ? '儲存中…' : '儲存課程設定'}</button><small>此處的手動設定會優先於自動盤點結果，不會被後續同步覆蓋。</small></div>}</div>
-  if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${courseCategory(course)} · ${courseState(course)} · 原始字幕 ${course.rawCaptionCount || 0} 份`} back={back} />{courseEditor}<div className="course-detail"><div><span className="eyebrow">尚未建立網站單元</span><h2>這門課已完成盤點，尚未進入整理流程。</h2><p>原始資料仍留在本機待處理課程資料夾。開始字幕潤飾與單元筆記後，網站會自動建立可搜尋的課程內容。</p></div><div className="detail-actions"><button onClick={() => setPage('courses')}><FolderOpen size={22} />回到課程庫</button></div></div></section>
+  if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${courseCategory(course)} · ${courseState(course)} · 原始字幕 ${course.rawCaptionCount || 0} 份`} back={back} />{courseEditor}<div className="course-detail"><div><span className="eyebrow">等待內容筆記完成</span><h2>這門課的字幕已保留，但尚未有通過品質檢查的知識筆記。</h2><p>網站不會再把字幕片段顯示成重點。完成 Obsidian 中的課程結論、重點整理與對應時間碼後，單元會自動出現在這裡並可搜尋。</p></div><div className="detail-actions"><button onClick={() => setPage('courses')}><FolderOpen size={22} />回到課程庫</button></div></div></section>
   return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${courseCategory(course)} · ${courseState(course)} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />{courseEditor}
     <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>{lessons.length.toString().padStart(2, '0')}</strong></div>{lessons.map(item => <button key={item.id} onClick={() => setUnit(item)} className={unit.id === item.id ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.duration}</small></button>)}</aside>
       <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.duration}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
@@ -122,7 +122,7 @@ function Chat({ back, setPage, courseList, openResult }) {
           getDocs(collection(db, 'courses', course.id, 'lessons')),
           getDocs(collection(db, 'courses', course.id, 'transcriptSegments')),
         ])
-        return { courseId: course.id, lessons: lessonSnapshot.docs.map(item => ({ id: item.id, ...item.data() })), transcripts: transcriptSnapshot.docs.map(item => item.data()) }
+        return { courseId: course.id, lessons: lessonSnapshot.docs.map(item => ({ id: item.id, ...item.data() })).filter(item => item.isPublished !== false), transcripts: transcriptSnapshot.docs.map(item => item.data()) }
       }))).reduce((all, item) => ({ lessons: [...all.lessons, ...item.lessons.map(lesson => ({ ...lesson, courseId: item.courseId }))], transcripts: [...all.transcripts, ...item.transcripts.map(segment => ({ ...segment, courseId: item.courseId }))] }), { lessons: [], transcripts: [] })
       const lessonMatches = courseIndexes.lessons
         .filter(lesson => terms.every(term => `${lesson.title} ${lesson.summary || ''} ${(lesson.tools || []).join(' ')} ${(lesson.steps || []).join(' ')}`.toLowerCase().includes(term)))
@@ -206,7 +206,7 @@ export function App() {
   useEffect(() => {
     if (!selectedCourse?.id) { setLessons([]); return }
     return onSnapshot(collection(db, 'courses', selectedCourse.id, 'lessons'), snapshot => {
-      setLessons(snapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort(compareLessons))
+      setLessons(snapshot.docs.map(item => ({ id: item.id, ...item.data() })).filter(item => item.isPublished !== false).sort(compareLessons))
     })
   }, [selectedCourse?.id])
   const openSearchResult = (result) => {

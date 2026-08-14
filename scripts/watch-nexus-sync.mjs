@@ -13,13 +13,10 @@ let transcriptChanged = false
 function sync() {
   if (running) return
   running = true
-  const child = spawn(process.execPath, ['scripts/generate-lesson-note-drafts.mjs'], { cwd: projectRoot, stdio: 'inherit' })
-  child.on('exit', () => {
-    const syncArgs = transcriptChanged ? [syncScript] : [syncScript, '--notes-only']
-    transcriptChanged = false
-    const syncChild = spawn(process.execPath, syncArgs, { cwd: projectRoot, stdio: 'inherit' })
-    syncChild.on('exit', () => { running = false })
-  })
+  const syncArgs = transcriptChanged ? [syncScript] : [syncScript, '--notes-only']
+  transcriptChanged = false
+  const syncChild = spawn(process.execPath, syncArgs, { cwd: projectRoot, stdio: 'inherit' })
+  syncChild.on('exit', () => { running = false })
 }
 
 function syncWebEdits() {
