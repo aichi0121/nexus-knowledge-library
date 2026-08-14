@@ -132,38 +132,14 @@ function metadata(folder) {
 async function syncCourse(db, ownerId, folder, dryRun) {
   const transcriptFolder = join(folder, '02｜清理逐字稿')
   const notesFolder = join(folder, '01｜單元筆記')
-  const files = existsSync(transcriptFolder) ? readdirSync(transcriptFolder).filter(name => name.endsWith('_字幕潤飾版.vtt')) : []
   const noteFiles = existsSync(notesFolder) ? readdirSync(notesFolder).filter(name => name.endsWith('.md')) : []
-  if (!files.length && !noteFiles.length) return { segments: 0, notes: 0 }
+  if (!noteFiles.length) return { segments: 0, notes: 0 }
   const course = metadata(folder)
-  const notesOnly = process.argv.includes('--notes-only')
-  const records = notesOnly ? [] : files.flatMap(file => {
-    const name = file.replace(/_字幕潤飾版\.vtt$/, '')
-    const lessonId = slug(name)
-    return segments(join(transcriptFolder, file)).map((segment, index) => ({ id: `${lessonId}-${String(index + 1).padStart(4, '0')}`, lessonId, sourceCaptionPath: file, tags: [course.category], searchTokens: searchTokens(segment.cleanText), ...segment }))
-  })
   const lessons = noteFiles.map(file => ({ ...lessonFromNote(join(notesFolder, file)), obsidianPath: `01｜單元筆記/${file}` }))
-  console.log(`${course.title}：${notesOnly ? '略過字幕索引' : `${records.length} 個段落`}、${lessons.length} 則單元筆記`)
-  if (dryRun) return { segments: records.length, notes: lessons.length }
-  for (let i = 0; i < records.length; i += 400) {
-    const batch = db.batch()
-    records.slice(i, i + 400).forEach(record => batch.set(db.doc(`courses/${course.id}/transcriptSegments/${record.id}`), { ...record, ownerId, updatedAt: FieldValue.serverTimestamp() }, { merge: true }))
-    await batch.commit()
-  }
+  console.log(`${course.title}：略過完整字幕與重複搜尋索引、${lessons.length} 則單元筆記`)
+  if (dryRun) return { segments: 0, notes: lessons.length }
   for (const lesson of lessons) {
-    await db.doc(`courses/${course.id}/lessons/${lesson.id}`).set({ ...lesson, ownerId, syncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
-    await db.doc(`searchIndex/${course.id}-${lesson.id}`).set({
-      ownerId,
-      courseId: course.id,
-      lessonId: lesson.id,
-      kind: '筆記',
-      title: lesson.title,
-      category: course.category,
-      summary: lesson.summary || '',
-      sourceTime: lesson.sourceReferences?.[0]?.time || '',
-      searchTokens: searchTokens([lesson.title, lesson.summary, ...(lesson.keyPoints || []), ...(lesson.concepts || []), ...(lesson.tools || []), ...(lesson.steps || [])].join(' ')),
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true })
+    await db.doc(`courses/${course.id}/lessons/${lesson.id}`).set({ ...lesson, ownerId, courseId: course.id, syncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
   }
   const existingLessons = await db.collection(`courses/${course.id}/lessons`).get()
   const desiredByPath = new Map(lessons.map(lesson => [lesson.obsidianPath, lesson.id]))
@@ -183,12 +159,13 @@ async function syncCourse(db, ownerId, folder, dryRun) {
     pendingReview: lessons.filter(lesson => lesson.status !== '內容筆記完成').length,
     invalidNotes: lessons.filter(lesson => lesson.status === '內容筆記完成' && !lesson.isPublished).length,
   }
-  await db.doc(`courses/${course.id}`).set({ ownerId, title: course.title, category: course.category, ...(notesOnly ? {} : { transcriptSegmentCount: records.length, transcriptIndexedAt: FieldValue.serverTimestamp() }), noteCount: lessons.length, quality, notesSyncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
-  return { segments: records.length, notes: lessons.length }
+  await db.doc(`courses/${course.id}`).set({ ownerId, title: course.title, category: course.category, noteCount: lessons.length, quality, notesSyncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+  return { segments: 0, notes: lessons.length }
 }
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run')
+  if (!process.argv.includes('--notes-only')) throw new Error('為保護私密內容，僅支援 --notes-only；完整字幕只保留在 Obsidian。')
   const requestedCourse = process.argv.includes('--course') ? process.argv[process.argv.indexOf('--course') + 1] : ''
   const app = getApps()[0] || initializeApp({ credential: cert(JSON.parse(readFileSync(keyPath, 'utf8'))) })
   const db = getFirestore(app)

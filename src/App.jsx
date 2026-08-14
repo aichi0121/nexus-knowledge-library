@@ -123,25 +123,11 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId, user })
   useEffect(() => { setCourseDraft({ category: courseCategory(course), tags: courseTags(course).join('、'), state: courseState(course) }) }, [course])
   useEffect(() => { const target = lessons.find(item => item.id === initialLessonId); if (target) setUnit(target) }, [initialLessonId, lessons])
   useEffect(() => { if (unit && tab === 'prompt' && !unit.prompts?.length) setTab('overview') }, [unit, tab])
-  const openSourceContext = async reference => {
+  const openSourceContext = reference => {
     const key = `${unit.id}:${reference.time}`
     if (expandedSource === key) { setExpandedSource(''); return }
     setExpandedSource(key)
-    if (sourceContexts[key]) return
-    setLoadingSource(key)
-    try {
-      const start = reference.time.split(/[-–—]/)[0].trim().split(':').reduce((total, value) => total * 60 + Number(value), 0)
-      const snapshot = await getDocs(query(collection(db, 'courses', course.id, 'transcriptSegments'), where('lessonId', '==', unit.id)))
-      const segments = snapshot.docs.map(item => item.data()).sort((a, b) => a.startSeconds - b.startSeconds)
-      if (!segments.length) {
-        setSourceContexts(current => ({ ...current, [key]: { error: '這個單元尚未同步可展開的字幕內容。' } }))
-        return
-      }
-      const closest = segments.reduce((best, segment, index) => Math.abs((segment.startSeconds || 0) - start) < Math.abs((segments[best]?.startSeconds || 0) - start) ? index : best, 0)
-      setSourceContexts(current => ({ ...current, [key]: { before: segments[closest - 1], focus: segments[closest], after: segments[closest + 1] } }))
-    } catch {
-      setSourceContexts(current => ({ ...current, [key]: { error: '暫時無法讀取此時間碼的字幕上下文。' } }))
-    } finally { setLoadingSource('') }
+    setSourceContexts(current => ({ ...current, [key]: { error: '完整字幕與上下文只保留在 Obsidian，網站不會讀取或儲存它。' } }))
   }
   const saveNote = async () => {
     const changes = { summary: draft.summary.trim(), tools: draft.tools.split('\n').map(item => item.trim()).filter(Boolean), steps: draft.steps.split('\n').map(item => item.replace(/^\d+[.)]\s*/, '').trim()).filter(Boolean) }
@@ -176,8 +162,7 @@ function Chat({ back, setPage, courseList, openResult }) {
   const [searching, setSearching] = useState(false)
   const [domain, setDomain] = useState('全部領域')
   const [courseId, setCourseId] = useState('全部課程')
-  const [sourceType, setSourceType] = useState('全部資料')
-  const [messages, setMessages] = useState([{ who: 'ai', text: '輸入關鍵字、工具名稱或課程概念，我會找出完整逐字稿、筆記、提示詞與對應來源。' }])
+  const [messages, setMessages] = useState([{ who: 'ai', text: '輸入關鍵字、工具名稱或課程概念，我會找出已發布筆記與對應來源時間碼。完整字幕仍保留在 Obsidian。' }])
   const searchTokens = text => [...new Set(text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/).flatMap(token => token.length > 1 ? [token, ...[...token].filter(char => /[\p{Script=Han}]/u.test(char))] : []))]
   const send = async () => {
     const text = question.trim()
@@ -190,16 +175,11 @@ function Chat({ back, setPage, courseList, openResult }) {
       if (!ownerId || !primaryTerm) throw new Error('索引尚未建立')
       const selectedCourses = courseList.filter(course => (domain === '全部領域' || courseCategory(course) === domain) && (courseId === '全部課程' || course.id === courseId))
       const allowedCourses = new Set(selectedCourses.map(course => course.id))
-      const wantsNotes = sourceType !== '字幕'
-      const wantsCaptions = sourceType !== '筆記'
-      const [noteSnapshot, transcriptSnapshot] = await Promise.all([
-        wantsNotes ? getDocs(query(collection(db, 'searchIndex'), where('ownerId', '==', ownerId), where('searchTokens', 'array-contains', primaryTerm), limit(60))) : Promise.resolve({ docs: [] }),
-        wantsCaptions ? getDocs(query(collectionGroup(db, 'transcriptSegments'), where('ownerId', '==', ownerId), where('searchTokens', 'array-contains', primaryTerm), limit(60))) : Promise.resolve({ docs: [] }),
-      ])
-      const includesTerms = item => terms.every(term => (item.searchTokens || []).includes(term) || (item.cleanText || item.summary || item.title || '').toLowerCase().includes(term))
-      const lessonMatches = noteSnapshot.docs.map(item => item.data()).filter(item => allowedCourses.has(item.courseId) && includesTerms(item)).map(item => ({ type: '單元筆記', title: item.title, detail: item.summary || '已建立知識筆記', source: `${courseList.find(course => course.id === item.courseId)?.title || '課程'} · ${item.sourceTime || '單元筆記'}`, courseId: item.courseId, lessonId: item.lessonId }))
-      const transcriptMatches = transcriptSnapshot.docs.map(item => item.data()).filter(item => allowedCourses.has(item.courseId) && includesTerms(item)).slice(0, 6).map(item => ({ type: '逐字稿片段', title: `${item.startTime}–${item.endTime}`, detail: item.cleanText.length > 150 ? `${item.cleanText.slice(0, 150)}…` : item.cleanText, source: `${courseList.find(course => course.id === item.courseId)?.title || '課程'} · ${item.startTime}`, courseId: item.courseId, lessonId: item.lessonId, sourceTime: item.startTime }))
-      const matches = [...lessonMatches, ...transcriptMatches].slice(0, 8)
+      const noteSnapshot = await getDocs(query(collectionGroup(db, 'lessons'), where('ownerId', '==', ownerId), limit(500)))
+      const includesTerms = item => terms.every(term => [item.title, item.summary, ...(item.keyPoints || []), ...(item.concepts || []), ...(item.tools || []), ...(item.steps || [])].join(' ').toLowerCase().includes(term))
+      const matches = noteSnapshot.docs.map(doc => ({ ...doc.data(), courseId: doc.data().courseId || doc.ref.parent.parent?.id, lessonId: doc.id }))
+        .filter(item => allowedCourses.has(item.courseId) && includesTerms(item)).slice(0, 8)
+        .map(item => ({ type: '單元筆記', title: item.title, detail: item.summary || '已建立知識筆記', source: `${courseList.find(course => course.id === item.courseId)?.title || '課程'} · ${item.sourceReferences?.[0]?.time || '單元筆記'}`, courseId: item.courseId, lessonId: item.lessonId }))
       const answer = matches.length ? `已搜尋全部 ${courseList.length} 門已入庫課程，找到 ${matches.length} 筆相關資料：\n${matches.map(item => `・${item.type}｜${item.title}\n  ${item.detail}`).join('\n')}` : '已搜尋全部已入庫課程，但找不到完全相符的索引。可改用課程名稱、概念、工具或字幕中的關鍵字。'
       setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: answer, source: matches.map(item => item.source).join(' · '), results: matches }])
       setQuestion('')
@@ -207,8 +187,8 @@ function Chat({ back, setPage, courseList, openResult }) {
       setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: '跨課程搜尋暫時無法讀取索引，請重新整理後再試。' }])
     } finally { setSearching(false) }
   }
-  return <section className="app-page chat-page"><PageHeader eyebrow="跨課程全文搜尋" title="知識搜尋" description="使用同步搜尋索引查詢筆記與字幕；每個結果都能回到對應課程與單元。" back={back} />
-    <div className="chat-layout"><aside><span className="eyebrow">搜尋範圍</span><label>領域<select value={domain} onChange={event => setDomain(event.target.value)}><option>全部領域</option>{[...new Set(courseList.map(course => courseCategory(course)))].map(item => <option key={item}>{item}</option>)}</select></label><label>課程<select value={courseId} onChange={event => setCourseId(event.target.value)}><option value="全部課程">全部課程</option>{courseList.filter(course => domain === '全部領域' || courseCategory(course) === domain).map(course => <option key={course.id} value={course.id}>{course.title}</option>)}</select></label><label>資料類型<select value={sourceType} onChange={event => setSourceType(event.target.value)}><option value="全部資料">筆記＋字幕</option><option value="筆記">筆記</option><option value="字幕">字幕／時間碼</option></select></label><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('八字')}>八字</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.results?.map(result => <button className="search-result" key={`${result.type}-${result.title}-${result.source}`} onClick={() => openResult(result)}><span>{result.type}</span><b>{result.title}</b><small>{result.source}</small><ArrowRight size={17} /></button>)}{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋所有課程的筆記、概念、工具或逐字稿內容⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
+  return <section className="app-page chat-page"><PageHeader eyebrow="跨課程筆記搜尋" title="知識搜尋" description="只搜尋已發布的知識筆記；完整字幕與逐字稿保留在 Obsidian。" back={back} />
+    <div className="chat-layout"><aside><span className="eyebrow">搜尋範圍</span><label>領域<select value={domain} onChange={event => setDomain(event.target.value)}><option>全部領域</option>{[...new Set(courseList.map(course => courseCategory(course)))].map(item => <option key={item}>{item}</option>)}</select></label><label>課程<select value={courseId} onChange={event => setCourseId(event.target.value)}><option value="全部課程">全部課程</option>{courseList.filter(course => domain === '全部領域' || courseCategory(course) === domain).map(course => <option key={course.id} value={course.id}>{course.title}</option>)}</select></label><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('八字')}>八字</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.results?.map(result => <button className="search-result" key={`${result.type}-${result.title}-${result.source}`} onClick={() => openResult(result)}><span>{result.type}</span><b>{result.title}</b><small>{result.source}</small><ArrowRight size={17} /></button>)}{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋所有課程的筆記、概念或工具⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
   </section>
 }
 

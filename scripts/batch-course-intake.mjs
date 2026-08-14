@@ -9,7 +9,7 @@ const sourceRoots = args.filter(value => !value.startsWith('--')).map(value => r
 const roots = sourceRoots.length ? sourceRoots : defaultSources.filter(existsSync)
 
 const classify = title => {
-  if (/八字|命理|流年|五行|命盤/.test(title)) return '命理｜人生規劃'
+  if (/八字|命理|流年|五行|命盤|風水|紫白飛星|九宮/.test(title)) return '命理｜人生規劃'
   if (/AI|人工智慧|ChatGPT|GPT|影片/.test(title)) return '數位工具｜AI'
   return '待分類'
 }

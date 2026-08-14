@@ -91,12 +91,15 @@ for (const courseFolder of targetFolders) {
     if (!existsSync(notePath)) continue
     const generated = draft(cues(join(transcriptFolder, file)))
     const markdown = readFileSync(notePath, 'utf8')
-    if (!/待從已潤飾字幕|待內容筆記整理|完整時間碼見字幕檔/.test(markdown)) continue
+    // Support both the legacy draft template and the current knowledge-note
+    // template. Only notes that have not been content-reviewed are eligible.
+    if (!/待從已潤飾字幕|待內容筆記整理|完整時間碼見字幕檔/.test(markdown) && !/^status:\s*待內容理解\s*$/m.test(markdown)) continue
     const candidate = sectionRange(markdown, '自動整理候選（待校對）')
     const insertAt = /^##\s+字幕與來源\s*$/m.exec(markdown)?.index ?? markdown.length
-    const updatedMarkdown = candidate
+    const withCandidate = candidate
       ? `${markdown.slice(0, candidate.start - '## 自動整理候選（待校對）'.length)}${candidateBlock(generated)}${markdown.slice(candidate.end)}`
       : `${markdown.slice(0, insertAt)}${candidateBlock(generated)}${markdown.slice(insertAt)}`
+    const updatedMarkdown = withCandidate.replace(/^status:\s*待內容理解\s*$/m, 'status: 待人工校對')
     console.log(`${dryRun ? '預覽更新' : '更新初稿'}：${name}`)
     if (!dryRun) writeFileSync(notePath, updatedMarkdown, 'utf8')
     updated += 1
