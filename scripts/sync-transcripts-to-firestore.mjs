@@ -41,6 +41,7 @@ function useful(value) {
 function listFrom(sectionText) {
   return sectionText
     .split('\n')
+    .filter(line => /^\s*(?:[-*]|\d+[.)])\s+/.test(line))
     .map(line => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, '').trim())
     .map(stripMarkdown)
     .filter(useful)
@@ -55,14 +56,17 @@ function lessonFromNote(path) {
   const title = stripMarkdown(markdown.match(/^#\s+(.+)$/m)?.[1] || path.split('/').at(-1).replace(/\.md$/, ''))
   const filename = path.split('/').at(-1).replace(/\.md$/, '')
   const tools = listFrom(firstSection(markdown, ['工具／應用程式', '工具／方法', '工具與方法']))
-  const concepts = listFrom(firstSection(markdown, ['關鍵概念', '核心概念']))
+  const concepts = listFrom(firstSection(markdown, ['關鍵概念', '核心概念', '概念與方法']))
   const steps = listFrom(firstSection(markdown, ['實作步驟', '可立即行動']))
   const keyPoints = listFrom(firstSection(markdown, ['重點整理', '本課重點']))
   const summary = stripMarkdown(section(markdown, '這一課在教什麼？'))
   const prompts = section(markdown, '提示詞')
   const source = section(markdown, '來源時間碼')
   const sourceReferences = source.split('\n').flatMap(line => {
-    const match = line.match(/(\d{2}:\d{2}:\d{2}\s*(?:–|—|-)\s*\d{2}:\d{2}:\d{2})[`:：\s]+(.+)/)
+    // Notes use Markdown bold for readable time ranges. Parse the rendered text,
+    // otherwise asterisks prevent valid source references from being published.
+    const normalized = stripMarkdown(line)
+    const match = normalized.match(/(\d{2}:\d{2}:\d{2}\s*(?:–|—|-)\s*\d{2}:\d{2}:\d{2})[`:：\s]+(.+)/)
     if (!match) return []
     const note = stripMarkdown(match[2])
     return useful(note) ? [{ time: match[1].replace(/\s+/g, ''), note }] : []
@@ -79,7 +83,9 @@ function lessonFromNote(path) {
     title,
     ...(useful(summary) ? { summary } : {}),
     ...(tools.length ? { tools } : {}),
-    ...(concepts.length ? { concepts } : {}),
+    // Always send arrays so a later, better Obsidian note removes stale
+    // transcript-derived data left by an earlier sync.
+    concepts,
     ...(keyPoints.length ? { keyPoints } : {}),
     ...(steps.length ? { steps } : {}),
     ...(sourceTimeRanges.length ? { sourceTimeRanges, sourceReferences } : {}),
