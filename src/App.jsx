@@ -10,6 +10,8 @@ const emptyCourse = { title: '尚未同步課程', category: '等待同步', les
 const courseCategory = course => course.manualCategory || course.category || '待分類'
 const courseTags = course => course.manualTags || course.tags || []
 const courseState = course => course.manualInventoryState || course.inventoryState || (course.noteCount ? '有筆記' : course.processedCaptionCount ? '字幕已整理' : course.rawCaptionCount ? '待整理' : '無字幕')
+const courseOrder = course => Number((course.title || '').match(/^\s*(\d+)/)?.[1] || Number.MAX_SAFE_INTEGER)
+const compareCourses = (a, b) => courseOrder(a) - courseOrder(b) || (a.title || '').localeCompare(b.title || '', 'zh-Hant')
 const lessonOrder = lesson => (lesson.title.match(/^\d+(?:-\d+)*/) || ['999'])[0].split('-').map(value => Number(value))
 const compareLessons = (a, b) => { const left = lessonOrder(a); const right = lessonOrder(b); for (let index = 0; index < Math.max(left.length, right.length); index += 1) { const result = (left[index] ?? -1) - (right[index] ?? -1); if (result) return result } return a.title.localeCompare(b.title, 'zh-Hant') }
 
@@ -57,7 +59,7 @@ function Courses({ back, setPage, setSelectedCourse, courseList }) {
   const visibleCourses = courseList.filter(course => {
     const matchesText = `${course.title} ${courseCategory(course)} ${courseTags(course).join(' ')}`.toLowerCase().includes(filter.toLowerCase())
     return matchesText && (category === '全部領域' || courseCategory(course) === category) && (state === '全部狀態' || courseState(course) === state)
-  })
+  }).sort(compareCourses)
   return <section className="app-page"><PageHeader eyebrow="你的學習地圖" title="課程庫" description="所有課程、單元、字幕、筆記與提示詞都保有清楚的來源關係。" back={back} />
     <div className="course-toolbar"><div><Search size={20} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="搜尋課程、標籤或工具" /></div><select value={category} onChange={event => setCategory(event.target.value)}>{categories.map(item => <option key={item}>{item}</option>)}</select><select value={state} onChange={event => setState(event.target.value)}>{states.map(item => <option key={item}>{item}</option>)}</select><span className="course-count">{visibleCourses.length} / {courseList.length} 門課</span></div>
     <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{courseCategory(course)}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 個單元 · 原始字幕 {course.rawCaptionCount || 0} · 已整理 {course.processedCaptionCount || 0}</p><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
@@ -196,7 +198,7 @@ export function App() {
     const stopCourses = onSnapshot(ownCourses, async (snapshot) => {
       await ensureInitialNexusData(db, user)
       if (snapshot.empty) return
-      const nextCourses = snapshot.docs.map(item => ({ id: item.id, ...item.data() }))
+      const nextCourses = snapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort(compareCourses)
       setCourseList(nextCourses)
       setSelectedCourse(current => current ? nextCourses.find(item => item.id === current.id) || nextCourses[0] : nextCourses[0])
     })
