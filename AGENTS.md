@@ -1,5 +1,11 @@
 # Prototype Instructions
 
+## Product decisions
+
+- Nexus is a private, dark-theme knowledge library designed to grow beyond 300 courses.
+- Course management must prioritize information density: provide a compact list view, a card view, predictable numeric ordering, pagination, and status-based filtering.
+- Lesson material must remain evidence-based: polished subtitles are source material, while visible notes must be concise knowledge summaries with traceable timestamps.
+
 Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.
 
 Before making substantial visual changes, use the Product Design plugin's `get-context` skill when the visual source is unclear or no longer matches the current goal. When the user gives durable prototype-specific design feedback, preferences, or decisions, record them in `AGENTS.md`.

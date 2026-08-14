@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, ArrowRight, BookOpen, Check, CircleUserRound, Clock3, FileText, FolderOpen, MessageCircle, Play, Plus, Search, Sparkles, Upload, Video } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BookOpen, Check, CircleUserRound, Clock3, FileText, FolderOpen, LayoutGrid, List, MessageCircle, Play, Plus, Search, Sparkles, Upload, Video } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { auth, db } from './firebase'
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
-import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore'
+import { collection, collectionGroup, doc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore'
 import { ensureInitialNexusData } from './nexusData'
 
 const emptyCourse = { title: '尚未同步課程', category: '等待同步', lessonCount: 0, processedCaptionCount: 0, color: 'amber' }
@@ -12,6 +12,9 @@ const courseTags = course => course.manualTags || course.tags || []
 const courseState = course => course.manualInventoryState || course.inventoryState || (course.noteCount ? '有筆記' : course.processedCaptionCount ? '字幕已整理' : course.rawCaptionCount ? '待整理' : '無字幕')
 const courseOrder = course => Number((course.title || '').match(/^\s*(\d+)/)?.[1] || Number.MAX_SAFE_INTEGER)
 const compareCourses = (a, b) => courseOrder(a) - courseOrder(b) || (a.title || '').localeCompare(b.title || '', 'zh-Hant')
+const courseQuality = course => course.quality || { totalNotes: course.noteCount || 0, verifiedNotes: course.noteCount || 0, missingTimecodes: 0, pendingReview: 0, invalidNotes: 0 }
+const qualityPercent = course => { const quality = courseQuality(course); return quality.totalNotes ? Math.round((quality.verifiedNotes || 0) / quality.totalNotes * 100) : 0 }
+const dateValue = value => value?.toDate?.()?.getTime?.() || value?.seconds * 1000 || 0
 const lessonOrder = lesson => (lesson.title.match(/^\d+(?:-\d+)*/) || ['999'])[0].split('-').map(value => Number(value))
 const compareLessons = (a, b) => { const left = lessonOrder(a); const right = lessonOrder(b); for (let index = 0; index < Math.max(left.length, right.length); index += 1) { const result = (left[index] ?? -1) - (right[index] ?? -1); if (result) return result } return a.title.localeCompare(b.title, 'zh-Hant') }
 
@@ -42,9 +45,12 @@ function Home({ setPage, courseCount, jobCount }) {
 
 function PageHeader({ eyebrow, title, description, back }) { return <header className="page-header"><button className="back-button" onClick={back}><ArrowLeft size={25} />回到首頁</button><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></header> }
 
-function Inbox({ back, setPage, jobs }) {
+function Inbox({ back, setPage, jobs, syncStatus }) {
+  const syncedAt = syncStatus?.lastCompletedAt?.toDate?.()
+  const syncLabel = syncedAt ? syncedAt.toLocaleString('zh-TW', { dateStyle: 'medium', timeStyle: 'short' }) : '尚未取得同步紀錄'
   return <section className="app-page"><PageHeader eyebrow="Codex 處理流程" title="處理紀錄" description="課程先下載到本機，由 Codex 整理；網站只同步已完成的知識結果，不重複上傳原始影音。" back={back} />
     <div className="notice"><Check size={25} />本機資料夾處理完成後，會同步清理逐字稿、筆記、提示詞與來源時間碼。</div>
+    <section className="sync-status" aria-label="同步狀態"><div><small>同步狀態</small><strong>{syncStatus?.status || '等待首次同步'}</strong></div><div><small>最後同步時間</small><strong>{syncLabel}</strong></div><div><small>待同步步數</small><strong>{syncStatus?.pendingSteps ?? 0}</strong></div><div><small>失敗原因</small><strong>{syncStatus?.failureReason || '無'}</strong></div></section>
     <div className="section-row"><h2>最近處理的課程</h2><button onClick={() => setPage('courses')}>查看課程庫 <ArrowRight size={22} /></button></div>
     <div className="inbox-list">{jobs.map(item => <article key={item.id} className="inbox-item"><span className="item-icon"><FileText size={29} /></span><div><h3>{item.status}</h3><p>{item.videoCount || 0} 部影片 · {item.pdfCount || 0} 份講義 · {item.captionCount || 0} 份字幕</p></div><strong className="status">已同步</strong><button aria-label="查看處理紀錄"><ArrowRight size={25} /></button></article>)}</div>
   </section>
@@ -54,15 +60,49 @@ function Courses({ back, setPage, setSelectedCourse, courseList }) {
   const [filter, setFilter] = useState('')
   const [category, setCategory] = useState('全部領域')
   const [state, setState] = useState('全部狀態')
+  const [qualityFilter, setQualityFilter] = useState('全部品質')
+  const [view, setView] = useState('list')
+  const [sortBy, setSortBy] = useState('number')
+  const [pageSize, setPageSize] = useState(25)
+  const [pageNumber, setPageNumber] = useState(1)
   const categories = ['全部領域', ...new Set(courseList.map(course => courseCategory(course)).filter(Boolean))]
   const states = ['全部狀態', '有筆記', '字幕已整理', '待整理', '無字幕']
+  const summary = courseList.reduce((total, course) => {
+    const quality = courseQuality(course)
+    total.total += quality.totalNotes || 0
+    total.verified += quality.verifiedNotes || 0
+    total.missing += quality.missingTimecodes || 0
+    total.pending += quality.pendingReview || 0
+    total.invalid += quality.invalidNotes || 0
+    return total
+  }, { total: 0, verified: 0, missing: 0, pending: 0, invalid: 0 })
+  const qualityLabel = course => {
+    const quality = courseQuality(course)
+    if (quality.invalidNotes) return '內容品質不合格'
+    if (quality.missingTimecodes) return '缺時間碼'
+    if (quality.pendingReview) return '待人工校對'
+    return quality.totalNotes ? '已完成知識筆記' : '尚無筆記'
+  }
   const visibleCourses = courseList.filter(course => {
     const matchesText = `${course.title} ${courseCategory(course)} ${courseTags(course).join(' ')}`.toLowerCase().includes(filter.toLowerCase())
-    return matchesText && (category === '全部領域' || courseCategory(course) === category) && (state === '全部狀態' || courseState(course) === state)
-  }).sort(compareCourses)
+    const matchesQuality = qualityFilter === '全部品質' || qualityLabel(course) === qualityFilter
+    return matchesText && matchesQuality && (category === '全部領域' || courseCategory(course) === category) && (state === '全部狀態' || courseState(course) === state)
+  }).sort((a, b) => {
+    if (sortBy === 'updated') return dateValue(b.updatedAt) - dateValue(a.updatedAt) || compareCourses(a, b)
+    if (sortBy === 'state') return courseState(a).localeCompare(courseState(b), 'zh-Hant') || compareCourses(a, b)
+    if (sortBy === 'quality') return qualityPercent(b) - qualityPercent(a) || compareCourses(a, b)
+    return compareCourses(a, b)
+  })
+  const pageCount = Math.max(1, Math.ceil(visibleCourses.length / pageSize))
+  const currentPage = Math.min(pageNumber, pageCount)
+  const pagedCourses = visibleCourses.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  const resetPage = setter => value => { setter(value); setPageNumber(1) }
+  const openCourse = course => { setSelectedCourse(course); setPage('detail') }
   return <section className="app-page"><PageHeader eyebrow="你的學習地圖" title="課程庫" description="所有課程、單元、字幕、筆記與提示詞都保有清楚的來源關係。" back={back} />
-    <div className="course-toolbar"><div><Search size={20} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="搜尋課程、標籤或工具" /></div><select value={category} onChange={event => setCategory(event.target.value)}>{categories.map(item => <option key={item}>{item}</option>)}</select><select value={state} onChange={event => setState(event.target.value)}>{states.map(item => <option key={item}>{item}</option>)}</select><span className="course-count">{visibleCourses.length} / {courseList.length} 門課</span></div>
-    <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{courseCategory(course)}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 個單元 · 原始字幕 {course.rawCaptionCount || 0} · 已整理 {course.processedCaptionCount || 0}</p><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
+    <section className="quality-dashboard" aria-label="課程品質總覽"><div><small>已完成知識筆記</small><strong>{summary.verified} / {summary.total}</strong><span>{summary.total ? `${Math.round(summary.verified / summary.total * 100)}% 已通過品質檢查` : '尚無單元筆記'}</span></div><button onClick={() => { setQualityFilter('缺時間碼'); setPageNumber(1) }}><small>缺時間碼</small><strong>{summary.missing}</strong><span>需要補上可回查來源</span></button><button onClick={() => { setQualityFilter('待人工校對'); setPageNumber(1) }}><small>待人工校對</small><strong>{summary.pending}</strong><span>已有內容，尚待確認</span></button><button onClick={() => { setQualityFilter('內容品質不合格'); setPageNumber(1) }}><small>內容品質不合格</small><strong>{summary.invalid}</strong><span>不會發布為正式筆記</span></button></section>
+    <div className="course-toolbar course-toolbar-extended"><div><Search size={20} /><input value={filter} onChange={(event) => { setFilter(event.target.value); setPageNumber(1) }} placeholder="搜尋課程、標籤或工具" /></div><select value={category} onChange={event => resetPage(setCategory)(event.target.value)}>{categories.map(item => <option key={item}>{item}</option>)}</select><select value={state} onChange={event => resetPage(setState)(event.target.value)}>{states.map(item => <option key={item}>{item}</option>)}</select><select value={qualityFilter} onChange={event => resetPage(setQualityFilter)(event.target.value)}>{['全部品質', '已完成知識筆記', '缺時間碼', '待人工校對', '內容品質不合格', '尚無筆記'].map(item => <option key={item}>{item}</option>)}</select><select aria-label="排序方式" value={sortBy} onChange={event => resetPage(setSortBy)(event.target.value)}><option value="number">依編號排序</option><option value="updated">最近更新</option><option value="state">處理狀態</option><option value="quality">筆記完成度</option></select><select aria-label="每頁筆數" value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPageNumber(1) }}><option value={25}>每頁 25 門</option><option value={50}>每頁 50 門</option><option value={100}>每頁 100 門</option></select><div className="view-switch" aria-label="檢視方式"><button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')} title="緊湊列表"><List size={18} />列表</button><button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')} title="卡片檢視"><LayoutGrid size={18} />卡片</button></div><span className="course-count">{visibleCourses.length} / {courseList.length} 門課</span></div>
+    <div className={view === 'grid' ? 'course-grid' : 'course-list'}>{pagedCourses.map(course => view === 'grid' ? <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => openCourse(course)}><span>{courseCategory(course)}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 個單元 · 原始字幕 {course.rawCaptionCount || 0} · 已整理 {course.processedCaptionCount || 0}</p><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={20} /></button> : <button key={course.id} className="course-list-row" onClick={() => openCourse(course)}><b className="course-number">{String(courseOrder(course)).padStart(3, '0')}</b><div className="course-list-title"><strong>{course.title}</strong><span>{courseCategory(course)} · {courseTags(course).slice(0, 3).join(' · ') || '未分類'}</span></div><div><small>內容筆記</small><strong>{courseQuality(course).verifiedNotes || 0} / {courseQuality(course).totalNotes || 0}</strong></div><div><small>字幕</small><strong>{course.processedCaptionCount || 0} / {course.rawCaptionCount || 0}</strong></div><div><small>品質</small><strong className={`quality-state ${qualityLabel(course)}`}>{qualityLabel(course)}</strong></div><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={19} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
+    {visibleCourses.length > pageSize && <nav className="course-pagination" aria-label="課程分頁"><button disabled={currentPage === 1} onClick={() => setPageNumber(value => value - 1)}>上一頁</button><span>第 {currentPage} / {pageCount} 頁</span><button disabled={currentPage === pageCount} onClick={() => setPageNumber(value => value + 1)}>下一頁</button></nav>}
   </section>
 }
 
@@ -111,28 +151,32 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId, user })
 function Chat({ back, setPage, courseList, openResult }) {
   const [question, setQuestion] = useState('')
   const [searching, setSearching] = useState(false)
+  const [domain, setDomain] = useState('全部領域')
+  const [courseId, setCourseId] = useState('全部課程')
+  const [sourceType, setSourceType] = useState('全部資料')
   const [messages, setMessages] = useState([{ who: 'ai', text: '輸入關鍵字、工具名稱或課程概念，我會找出完整逐字稿、筆記、提示詞與對應來源。' }])
+  const searchTokens = text => [...new Set(text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/).flatMap(token => token.length > 1 ? [token, ...[...token].filter(char => /[\p{Script=Han}]/u.test(char))] : []))]
   const send = async () => {
     const text = question.trim()
     if (!text) return
     setSearching(true)
-    const terms = text.toLowerCase().split(/\s+/).filter(Boolean)
+    const terms = searchTokens(text)
     try {
-      const courseMatches = courseList.map(course => ({ type: '課程', title: course.title, detail: [courseCategory(course), ...courseTags(course)].join(' · '), source: '課程總覽', courseId: course.id })).filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term)))
-      const courseIndexes = (await Promise.all(courseList.map(async course => {
-        const [lessonSnapshot, transcriptSnapshot] = await Promise.all([
-          getDocs(collection(db, 'courses', course.id, 'lessons')),
-          getDocs(collection(db, 'courses', course.id, 'transcriptSegments')),
-        ])
-        return { courseId: course.id, lessons: lessonSnapshot.docs.map(item => ({ id: item.id, ...item.data() })).filter(item => item.isPublished !== false), transcripts: transcriptSnapshot.docs.map(item => item.data()) }
-      }))).reduce((all, item) => ({ lessons: [...all.lessons, ...item.lessons.map(lesson => ({ ...lesson, courseId: item.courseId }))], transcripts: [...all.transcripts, ...item.transcripts.map(segment => ({ ...segment, courseId: item.courseId }))] }), { lessons: [], transcripts: [] })
-      const lessonMatches = courseIndexes.lessons
-        .filter(lesson => terms.every(term => `${lesson.title} ${lesson.summary || ''} ${(lesson.tools || []).join(' ')} ${(lesson.steps || []).join(' ')}`.toLowerCase().includes(term)))
-        .map(lesson => ({ type: '單元筆記', title: lesson.title, detail: lesson.summary || lesson.status, source: `${courseList.find(course => course.id === lesson.courseId)?.title || '課程'} · ${lesson.sourceReferences?.[0]?.time || '單元筆記'}`, courseId: lesson.courseId, lessonId: lesson.id }))
-      const transcriptMatches = courseIndexes.transcripts
-        .filter(segment => terms.every(term => segment.cleanText.toLowerCase().includes(term))).slice(0, 6)
-        .map(segment => ({ type: '逐字稿片段', title: `${segment.startTime}–${segment.endTime}`, detail: segment.cleanText.length > 150 ? `${segment.cleanText.slice(0, 150)}…` : segment.cleanText, source: `${courseList.find(course => course.id === segment.courseId)?.title || '課程'} · ${segment.startTime}`, courseId: segment.courseId, lessonId: segment.lessonId, sourceTime: segment.startTime }))
-      const matches = [...courseMatches, ...lessonMatches, ...transcriptMatches].slice(0, 8)
+      const ownerId = courseList[0]?.ownerId
+      const primaryTerm = terms.find(term => /[\p{Script=Han}]/u.test(term))?.match(/[\p{Script=Han}]/u)?.[0] || terms[0]
+      if (!ownerId || !primaryTerm) throw new Error('索引尚未建立')
+      const selectedCourses = courseList.filter(course => (domain === '全部領域' || courseCategory(course) === domain) && (courseId === '全部課程' || course.id === courseId))
+      const allowedCourses = new Set(selectedCourses.map(course => course.id))
+      const wantsNotes = sourceType !== '字幕'
+      const wantsCaptions = sourceType !== '筆記'
+      const [noteSnapshot, transcriptSnapshot] = await Promise.all([
+        wantsNotes ? getDocs(query(collection(db, 'searchIndex'), where('ownerId', '==', ownerId), where('searchTokens', 'array-contains', primaryTerm), limit(60))) : Promise.resolve({ docs: [] }),
+        wantsCaptions ? getDocs(query(collectionGroup(db, 'transcriptSegments'), where('ownerId', '==', ownerId), where('searchTokens', 'array-contains', primaryTerm), limit(60))) : Promise.resolve({ docs: [] }),
+      ])
+      const includesTerms = item => terms.every(term => (item.searchTokens || []).includes(term) || (item.cleanText || item.summary || item.title || '').toLowerCase().includes(term))
+      const lessonMatches = noteSnapshot.docs.map(item => item.data()).filter(item => allowedCourses.has(item.courseId) && includesTerms(item)).map(item => ({ type: '單元筆記', title: item.title, detail: item.summary || '已建立知識筆記', source: `${courseList.find(course => course.id === item.courseId)?.title || '課程'} · ${item.sourceTime || '單元筆記'}`, courseId: item.courseId, lessonId: item.lessonId }))
+      const transcriptMatches = transcriptSnapshot.docs.map(item => item.data()).filter(item => allowedCourses.has(item.courseId) && includesTerms(item)).slice(0, 6).map(item => ({ type: '逐字稿片段', title: `${item.startTime}–${item.endTime}`, detail: item.cleanText.length > 150 ? `${item.cleanText.slice(0, 150)}…` : item.cleanText, source: `${courseList.find(course => course.id === item.courseId)?.title || '課程'} · ${item.startTime}`, courseId: item.courseId, lessonId: item.lessonId, sourceTime: item.startTime }))
+      const matches = [...lessonMatches, ...transcriptMatches].slice(0, 8)
       const answer = matches.length ? `已搜尋全部 ${courseList.length} 門已入庫課程，找到 ${matches.length} 筆相關資料：\n${matches.map(item => `・${item.type}｜${item.title}\n  ${item.detail}`).join('\n')}` : '已搜尋全部已入庫課程，但找不到完全相符的索引。可改用課程名稱、概念、工具或字幕中的關鍵字。'
       setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: answer, source: matches.map(item => item.source).join(' · '), results: matches }])
       setQuestion('')
@@ -140,8 +184,8 @@ function Chat({ back, setPage, courseList, openResult }) {
       setMessages(current => [...current, { who: 'me', text }, { who: 'ai', text: '跨課程搜尋暫時無法讀取索引，請重新整理後再試。' }])
     } finally { setSearching(false) }
   }
-  return <section className="app-page chat-page"><PageHeader eyebrow="跨課程全文搜尋" title="知識搜尋" description="一次搜尋所有已入庫課程的筆記與逐字稿；每個結果都能回到對應課程與單元。" back={back} />
-    <div className="chat-layout"><aside><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('八字')}>八字</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.results?.map(result => <button className="search-result" key={`${result.type}-${result.title}-${result.source}`} onClick={() => openResult(result)}><span>{result.type}</span><b>{result.title}</b><small>{result.source}</small><ArrowRight size={17} /></button>)}{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋所有課程的筆記、概念、工具或逐字稿內容⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
+  return <section className="app-page chat-page"><PageHeader eyebrow="跨課程全文搜尋" title="知識搜尋" description="使用同步搜尋索引查詢筆記與字幕；每個結果都能回到對應課程與單元。" back={back} />
+    <div className="chat-layout"><aside><span className="eyebrow">搜尋範圍</span><label>領域<select value={domain} onChange={event => setDomain(event.target.value)}><option>全部領域</option>{[...new Set(courseList.map(course => courseCategory(course)))].map(item => <option key={item}>{item}</option>)}</select></label><label>課程<select value={courseId} onChange={event => setCourseId(event.target.value)}><option value="全部課程">全部課程</option>{courseList.filter(course => domain === '全部領域' || courseCategory(course) === domain).map(course => <option key={course.id} value={course.id}>{course.title}</option>)}</select></label><label>資料類型<select value={sourceType} onChange={event => setSourceType(event.target.value)}><option value="全部資料">筆記＋字幕</option><option value="筆記">筆記</option><option value="字幕">字幕／時間碼</option></select></label><span className="eyebrow">試著搜尋</span><button onClick={() => setQuestion('AI 影片')}>AI 影片</button><button onClick={() => setQuestion('Seedance')}>Seedance</button><button onClick={() => setQuestion('八字')}>八字</button><button onClick={() => setPage('inbox')}><Clock3 size={24} />查看處理紀錄</button></aside><div className="chat-window"><div className="messages">{messages.map((message, i) => <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1 }} key={i} className={`message ${message.who}`}>{message.who === 'ai' && <Search size={23} />}<span style={{ whiteSpace: 'pre-line' }}>{message.text}</span>{message.results?.map(result => <button className="search-result" key={`${result.type}-${result.title}-${result.source}`} onClick={() => openResult(result)}><span>{result.type}</span><b>{result.title}</b><small>{result.source}</small><ArrowRight size={17} /></button>)}{message.who === 'ai' && i > 0 && <small>來源：{message.source || '知識庫索引'}</small>}</motion.div>)}</div><div className="chat-composer"><textarea value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} placeholder="搜尋所有課程的筆記、概念、工具或逐字稿內容⋯⋯" /><button onClick={send} disabled={searching} aria-label="開始搜尋"><Search size={24} /></button></div></div></div>
   </section>
 }
 
@@ -190,9 +234,10 @@ export function App() {
   const [selectedCourse, setSelectedCourse] = useState(null)
   const [selectedLessonId, setSelectedLessonId] = useState(null)
   const [lessons, setLessons] = useState([])
+  const [syncStatus, setSyncStatus] = useState(null)
   const signIn = async () => { const result = await signInWithPopup(auth, new GoogleAuthProvider()); await setDoc(doc(db, 'users', result.user.uid), { displayName: result.user.displayName || 'Nexus 使用者', email: result.user.email || '', createdAt: serverTimestamp() }, { merge: true }) }
   useEffect(() => {
-    if (!allowed) { setCourseList([]); setJobs([]); return }
+    if (!allowed) { setCourseList([]); setJobs([]); setSyncStatus(null); return }
     const ownCourses = query(collection(db, 'courses'), where('ownerId', '==', user.uid))
     const ownJobs = query(collection(db, 'processingJobs'), where('ownerId', '==', user.uid))
     const stopCourses = onSnapshot(ownCourses, async (snapshot) => {
@@ -203,7 +248,8 @@ export function App() {
       setSelectedCourse(current => current ? nextCourses.find(item => item.id === current.id) || nextCourses[0] : nextCourses[0])
     })
     const stopJobs = onSnapshot(ownJobs, snapshot => setJobs(snapshot.docs.map(item => ({ id: item.id, ...item.data() }))))
-    return () => { stopCourses(); stopJobs() }
+    const stopStatus = onSnapshot(doc(db, 'syncStatus', 'nexus'), snapshot => setSyncStatus(snapshot.exists() ? snapshot.data() : null))
+    return () => { stopCourses(); stopJobs(); stopStatus() }
   }, [allowed, user])
   useEffect(() => {
     if (!selectedCourse?.id) { setLessons([]); return }
@@ -218,5 +264,5 @@ export function App() {
     setPage('detail')
   }
   if (!allowed) return <LoginGate user={user} ready={authReady} allowed={allowed} signIn={signIn} />
-  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} courseList={courseList} openResult={openSearchResult} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} initialLessonId={selectedLessonId} back={() => setPage('courses')} setPage={setPage} user={user} />}</motion.div>}</AnimatePresence></main>
+  return <main className="site-shell"><AnimatePresence mode="wait">{page === 'home' ? <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><Home setPage={setPage} courseCount={courseList.length} jobCount={jobs.length} /></motion.div> : <motion.div key={page} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: .25 }}><Nav page={page} setPage={setPage} />{page === 'inbox' && <Inbox back={() => setPage('home')} setPage={setPage} jobs={jobs} syncStatus={syncStatus} />}{page === 'courses' && <Courses back={() => setPage('home')} setPage={setPage} setSelectedCourse={setSelectedCourse} courseList={courseList} />}{page === 'chat' && <Chat back={() => setPage('home')} setPage={setPage} courseList={courseList} openResult={openSearchResult} />}{page === 'obsidian' && <Obsidian back={() => setPage('home')} setPage={setPage} />}{page === 'account' && <Account back={() => setPage('home')} user={user} allowed={allowed} />}{page === 'detail' && selectedCourse && <CourseDetail course={selectedCourse} lessons={lessons} initialLessonId={selectedLessonId} back={() => setPage('courses')} setPage={setPage} user={user} />}</motion.div>}</AnimatePresence></main>
 }

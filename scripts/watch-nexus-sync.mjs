@@ -37,4 +37,5 @@ watch(vault, { recursive: true }, (_, changed) => {
 })
 
 console.log('Nexus 自動同步已啟動，等待字幕潤飾版或單元筆記變更。')
-setInterval(syncWebEdits, 30000)
+sync()
+setInterval(() => { syncWebEdits(); sync() }, 5 * 60 * 1000)

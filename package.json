@@ -12,6 +12,11 @@
     "notes:validate": "node scripts/validate-obsidian-notes.mjs",
     "notes:draft": "node scripts/generate-lesson-note-drafts.mjs",
     "courses:inventory": "node scripts/inventory-course-library.mjs",
+    "courses:intake": "node scripts/batch-course-intake.mjs --apply",
+    "course:pipeline": "node scripts/run-course-knowledge-pipeline.mjs",
+    "course:193:pipeline": "node scripts/run-course-knowledge-pipeline.mjs --course '193｜（墨夏班）AI影片創作0-1實戰營'",
+    "search:rebuild": "node scripts/sync-transcripts-to-firestore.mjs",
+    "sync:service": "node scripts/nexus-background-service.mjs",
     "vtt:polish-pilot": "node scripts/polish-vtt-pilot.mjs",
     "course:import-bazi": "node scripts/import-bazi-course-batch.mjs"
   },

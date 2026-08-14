@@ -16,6 +16,7 @@ const knownLessons = new Map([
 const hash = value => createHash('sha1').update(value).digest('hex').slice(0, 16)
 const timeToSeconds = value => { const [h, m, s] = value.replace(',', '.').split(':'); return Number(h) * 3600 + Number(m) * 60 + Number(s) }
 const slug = value => knownLessons.get(value) || `lesson-${hash(value)}`
+const searchTokens = value => [...new Set(String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(/\s+/).flatMap(token => token.length > 1 ? [token, ...[...token].filter(char => /[\p{Script=Han}]/u.test(char))] : []))].slice(0, 180)
 const stripMarkdown = value => value
   .replace(/`([^`]+)`/g, '$1')
   .replace(/\*\*([^*]+)\*\*/g, '$1')
@@ -139,7 +140,7 @@ async function syncCourse(db, ownerId, folder, dryRun) {
   const records = notesOnly ? [] : files.flatMap(file => {
     const name = file.replace(/_字幕潤飾版\.vtt$/, '')
     const lessonId = slug(name)
-    return segments(join(transcriptFolder, file)).map((segment, index) => ({ id: `${lessonId}-${String(index + 1).padStart(4, '0')}`, lessonId, sourceCaptionPath: file, tags: [course.category], ...segment }))
+    return segments(join(transcriptFolder, file)).map((segment, index) => ({ id: `${lessonId}-${String(index + 1).padStart(4, '0')}`, lessonId, sourceCaptionPath: file, tags: [course.category], searchTokens: searchTokens(segment.cleanText), ...segment }))
   })
   const lessons = noteFiles.map(file => ({ ...lessonFromNote(join(notesFolder, file)), obsidianPath: `01｜單元筆記/${file}` }))
   console.log(`${course.title}：${notesOnly ? '略過字幕索引' : `${records.length} 個段落`}、${lessons.length} 則單元筆記`)
@@ -151,6 +152,18 @@ async function syncCourse(db, ownerId, folder, dryRun) {
   }
   for (const lesson of lessons) {
     await db.doc(`courses/${course.id}/lessons/${lesson.id}`).set({ ...lesson, ownerId, syncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+    await db.doc(`searchIndex/${course.id}-${lesson.id}`).set({
+      ownerId,
+      courseId: course.id,
+      lessonId: lesson.id,
+      kind: '筆記',
+      title: lesson.title,
+      category: course.category,
+      summary: lesson.summary || '',
+      sourceTime: lesson.sourceReferences?.[0]?.time || '',
+      searchTokens: searchTokens([lesson.title, lesson.summary, ...(lesson.keyPoints || []), ...(lesson.concepts || []), ...(lesson.tools || []), ...(lesson.steps || [])].join(' ')),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true })
   }
   const existingLessons = await db.collection(`courses/${course.id}/lessons`).get()
   const desiredByPath = new Map(lessons.map(lesson => [lesson.obsidianPath, lesson.id]))
@@ -163,25 +176,38 @@ async function syncCourse(db, ownerId, folder, dryRun) {
     legacyNotes.forEach(doc => batch.delete(doc.ref))
     await batch.commit()
   }
-  await db.doc(`courses/${course.id}`).set({ ownerId, title: course.title, category: course.category, ...(notesOnly ? {} : { transcriptSegmentCount: records.length, transcriptIndexedAt: FieldValue.serverTimestamp() }), noteCount: lessons.length, notesSyncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+  const quality = {
+    totalNotes: lessons.length,
+    verifiedNotes: lessons.filter(lesson => lesson.isPublished).length,
+    missingTimecodes: lessons.filter(lesson => useful(lesson.summary) && !lesson.sourceReferences?.length).length,
+    pendingReview: lessons.filter(lesson => lesson.status !== '內容筆記完成').length,
+    invalidNotes: lessons.filter(lesson => lesson.status === '內容筆記完成' && !lesson.isPublished).length,
+  }
+  await db.doc(`courses/${course.id}`).set({ ownerId, title: course.title, category: course.category, ...(notesOnly ? {} : { transcriptSegmentCount: records.length, transcriptIndexedAt: FieldValue.serverTimestamp() }), noteCount: lessons.length, quality, notesSyncedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true })
   return { segments: records.length, notes: lessons.length }
 }
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run')
+  const requestedCourse = process.argv.includes('--course') ? process.argv[process.argv.indexOf('--course') + 1] : ''
   const app = getApps()[0] || initializeApp({ credential: cert(JSON.parse(readFileSync(keyPath, 'utf8'))) })
   const db = getFirestore(app)
   const users = await db.collection('users').where('email', '==', 'aichi0121@gmail.com').limit(1).get()
   if (users.empty) throw new Error('找不到 Nexus 使用者，請先登入網站一次。')
-  const folders = readdirSync(vaultCourses, { withFileTypes: true }).filter(item => item.isDirectory()).map(item => join(vaultCourses, item.name))
+  const ownerId = users.docs[0].id
+  const syncStatus = db.doc('syncStatus/nexus')
+  await syncStatus.set({ ownerId, status: '同步中', lastStartedAt: FieldValue.serverTimestamp(), pendingSteps: 0, failureReason: '' }, { merge: true })
+  const folders = requestedCourse ? [resolve(requestedCourse)] : readdirSync(vaultCourses, { withFileTypes: true }).filter(item => item.isDirectory()).map(item => join(vaultCourses, item.name))
+  if (folders.some(folder => !existsSync(folder))) throw new Error(`找不到指定課程：${requestedCourse}`)
   let totalSegments = 0
   let totalNotes = 0
   for (const folder of folders) {
-    const result = await syncCourse(db, users.docs[0].id, folder, dryRun)
+    const result = await syncCourse(db, ownerId, folder, dryRun)
     totalSegments += result.segments
     totalNotes += result.notes
   }
+  if (!dryRun) await syncStatus.set({ ownerId, status: '已同步', lastCompletedAt: FieldValue.serverTimestamp(), pendingSteps: 0, failureReason: '', transcriptSegments: totalSegments, lessonNotes: totalNotes }, { merge: true })
   console.log(`${dryRun ? '預覽' : '完成'}：共 ${totalSegments} 個逐字稿段落、${totalNotes} 則單元筆記。`)
 }
 
-main().catch(error => { console.error(`同步失敗：${error.message}`); process.exitCode = 1 })
+main().catch(async error => { console.error(`同步失敗：${error.message}`); process.exitCode = 1 })
