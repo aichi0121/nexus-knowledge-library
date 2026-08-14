@@ -115,11 +115,34 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId, user })
   const [courseEditing, setCourseEditing] = useState(false)
   const [courseSaving, setCourseSaving] = useState(false)
   const [courseDraft, setCourseDraft] = useState({ category: '', tags: '', state: '' })
+  const [expandedSource, setExpandedSource] = useState('')
+  const [sourceContexts, setSourceContexts] = useState({})
+  const [loadingSource, setLoadingSource] = useState('')
   useEffect(() => { if (lessons[0]) setUnit(lessons[0]) }, [lessons])
   useEffect(() => { if (unit) setDraft({ summary: unit.summary || '', tools: (unit.tools || []).join('\n'), steps: (unit.steps || []).join('\n') }) }, [unit])
   useEffect(() => { setCourseDraft({ category: courseCategory(course), tags: courseTags(course).join('、'), state: courseState(course) }) }, [course])
   useEffect(() => { const target = lessons.find(item => item.id === initialLessonId); if (target) setUnit(target) }, [initialLessonId, lessons])
   useEffect(() => { if (unit && tab === 'prompt' && !unit.prompts?.length) setTab('overview') }, [unit, tab])
+  const openSourceContext = async reference => {
+    const key = `${unit.id}:${reference.time}`
+    if (expandedSource === key) { setExpandedSource(''); return }
+    setExpandedSource(key)
+    if (sourceContexts[key]) return
+    setLoadingSource(key)
+    try {
+      const start = reference.time.split(/[-–—]/)[0].trim().split(':').reduce((total, value) => total * 60 + Number(value), 0)
+      const snapshot = await getDocs(query(collection(db, 'courses', course.id, 'transcriptSegments'), where('lessonId', '==', unit.id)))
+      const segments = snapshot.docs.map(item => item.data()).sort((a, b) => a.startSeconds - b.startSeconds)
+      if (!segments.length) {
+        setSourceContexts(current => ({ ...current, [key]: { error: '這個單元尚未同步可展開的字幕內容。' } }))
+        return
+      }
+      const closest = segments.reduce((best, segment, index) => Math.abs((segment.startSeconds || 0) - start) < Math.abs((segments[best]?.startSeconds || 0) - start) ? index : best, 0)
+      setSourceContexts(current => ({ ...current, [key]: { before: segments[closest - 1], focus: segments[closest], after: segments[closest + 1] } }))
+    } catch {
+      setSourceContexts(current => ({ ...current, [key]: { error: '暫時無法讀取此時間碼的字幕上下文。' } }))
+    } finally { setLoadingSource('') }
+  }
   const saveNote = async () => {
     const changes = { summary: draft.summary.trim(), tools: draft.tools.split('\n').map(item => item.trim()).filter(Boolean), steps: draft.steps.split('\n').map(item => item.replace(/^\d+[.)]\s*/, '').trim()).filter(Boolean) }
     setSaving(true)
@@ -140,7 +163,7 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId, user })
           {tab === 'overview' && <><h3>這一課在教什麼？</h3><p>{unit.summary || '此單元正在等待本機處理結果同步。'}</p>{unit.keyPoints?.length > 0 && <div className="key-points"><span>本課重點</span><ol>{unit.keyPoints.map(point => <li key={point}>{point}</li>)}</ol></div>}</>}
           {tab === 'methods' && <><h3>概念與方法</h3>{unit.concepts?.length > 0 && <div className="key-points"><span>本課關鍵概念</span><ol>{unit.concepts.map(concept => <li key={concept}>{concept}</li>)}</ol></div>}{unit.tools?.length > 0 && <div className="key-points"><span>實際使用的工具</span><div className="tool-chips">{unit.tools.map(tool => <b key={tool}>{tool}</b>)}</div></div>}{unit.steps?.length > 0 && <div className="key-points"><span>學習／操作方法</span><ol>{unit.steps.map(step => <li key={step}>{step}</li>)}</ol></div>}</>}
           {tab === 'prompt' && <><h3>提示詞與工作流</h3>{unit.prompts.map(item => <div className="prompt-block" key={item.title}><strong>{item.title}</strong><code>{item.content}</code></div>)}</>}
-          {tab === 'sources' && <><h3>重點對應時間碼</h3><p className="source-explainer">每一段都對應本課的一項重點；可用「搜尋這一課」回到完整字幕查看上下文。</p><div className="timeline">{(unit.sourceReferences || []).map(reference => <div key={reference.time} className="timeline-item"><time>{reference.time}</time><span>{reference.note}</span></div>)}</div></>}
+          {tab === 'sources' && <><h3>重點對應時間碼</h3><p className="source-explainer">點選時間碼即可展開前段、對應段與後段字幕；「搜尋這一課」可回到完整字幕索引。</p><div className="timeline">{(unit.sourceReferences || []).map(reference => { const key = `${unit.id}:${reference.time}`; const context = sourceContexts[key]; return <div key={reference.time} className={`timeline-item ${expandedSource === key ? 'expanded' : ''}`}><button onClick={() => openSourceContext(reference)} aria-expanded={expandedSource === key}><time>{reference.time}</time><span>{reference.note}</span><ArrowRight size={17} /></button>{expandedSource === key && <div className="source-context">{loadingSource === key ? <p>正在載入字幕上下文…</p> : context?.error ? <p>{context.error}</p> : <>{[['前段', context?.before], ['對應段', context?.focus], ['後段', context?.after]].map(([label, segment]) => <div key={label} className={label === '對應段' ? 'focus' : ''}><small>{label}{segment ? ` · ${segment.startTime}–${segment.endTime}` : ''}</small><p>{segment?.cleanText || '沒有更多相鄰字幕。'}</p></div>)}</>}</div>}</div> })}</div></>}
         </motion.div></AnimatePresence>
         <footer><button onClick={() => setPage('chat')}><Search size={23} />搜尋這一課</button></footer>
       </article>
