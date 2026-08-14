@@ -7,6 +7,9 @@ import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, w
 import { ensureInitialNexusData } from './nexusData'
 
 const emptyCourse = { title: '尚未同步課程', category: '等待同步', lessonCount: 0, processedCaptionCount: 0, color: 'amber' }
+const courseCategory = course => course.manualCategory || course.category || '待分類'
+const courseTags = course => course.manualTags || course.tags || []
+const courseState = course => course.manualInventoryState || course.inventoryState || (course.noteCount ? '有筆記' : course.processedCaptionCount ? '字幕已整理' : course.rawCaptionCount ? '待整理' : '無字幕')
 
 function Nav({ page, setPage }) {
   return <nav className="app-nav" aria-label="主導覽">
@@ -47,16 +50,15 @@ function Courses({ back, setPage, setSelectedCourse, courseList }) {
   const [filter, setFilter] = useState('')
   const [category, setCategory] = useState('全部領域')
   const [state, setState] = useState('全部狀態')
-  const categories = ['全部領域', ...new Set(courseList.map(course => course.category).filter(Boolean))]
+  const categories = ['全部領域', ...new Set(courseList.map(course => courseCategory(course)).filter(Boolean))]
   const states = ['全部狀態', '有筆記', '字幕已整理', '待整理', '無字幕']
-  const courseState = course => course.inventoryState || (course.noteCount ? '有筆記' : course.processedCaptionCount ? '字幕已整理' : course.rawCaptionCount ? '待整理' : '無字幕')
   const visibleCourses = courseList.filter(course => {
-    const matchesText = `${course.title} ${course.category} ${(course.tags || []).join(' ')}`.toLowerCase().includes(filter.toLowerCase())
-    return matchesText && (category === '全部領域' || course.category === category) && (state === '全部狀態' || courseState(course) === state)
+    const matchesText = `${course.title} ${courseCategory(course)} ${courseTags(course).join(' ')}`.toLowerCase().includes(filter.toLowerCase())
+    return matchesText && (category === '全部領域' || courseCategory(course) === category) && (state === '全部狀態' || courseState(course) === state)
   })
   return <section className="app-page"><PageHeader eyebrow="你的學習地圖" title="課程庫" description="所有課程、單元、字幕、筆記與提示詞都保有清楚的來源關係。" back={back} />
     <div className="course-toolbar"><div><Search size={20} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="搜尋課程、標籤或工具" /></div><select value={category} onChange={event => setCategory(event.target.value)}>{categories.map(item => <option key={item}>{item}</option>)}</select><select value={state} onChange={event => setState(event.target.value)}>{states.map(item => <option key={item}>{item}</option>)}</select><span className="course-count">{visibleCourses.length} / {courseList.length} 門課</span></div>
-    <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{course.category}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 個單元 · 原始字幕 {course.rawCaptionCount || 0} · 已整理 {course.processedCaptionCount || 0}</p><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
+    <div className="course-grid">{visibleCourses.map(course => <button key={course.id} className={`course-card ${course.color || 'amber'}`} onClick={() => { setSelectedCourse(course); setPage('detail') }}><span>{courseCategory(course)}</span><h2>{course.title}</h2><p>{course.lessonCount || 0} 個單元 · 原始字幕 {course.rawCaptionCount || 0} · 已整理 {course.processedCaptionCount || 0}</p><small className={`course-state ${courseState(course)}`}>{courseState(course)}</small><ArrowRight size={20} /></button>)}{!visibleCourses.length && <p className="course-empty">沒有符合的課程。</p>}</div>
   </section>
 }
 
@@ -66,8 +68,12 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId, user })
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState({ summary: '', tools: '', steps: '' })
+  const [courseEditing, setCourseEditing] = useState(false)
+  const [courseSaving, setCourseSaving] = useState(false)
+  const [courseDraft, setCourseDraft] = useState({ category: '', tags: '', state: '' })
   useEffect(() => { if (lessons[0]) setUnit(lessons[0]) }, [lessons])
   useEffect(() => { if (unit) setDraft({ summary: unit.summary || '', tools: (unit.tools || []).join('\n'), steps: (unit.steps || []).join('\n') }) }, [unit])
+  useEffect(() => { setCourseDraft({ category: courseCategory(course), tags: courseTags(course).join('、'), state: courseState(course) }) }, [course])
   useEffect(() => { const target = lessons.find(item => item.id === initialLessonId); if (target) setUnit(target) }, [initialLessonId, lessons])
   useEffect(() => { if (unit && tab === 'prompt' && !unit.prompts?.length) setTab('overview') }, [unit, tab])
   const saveNote = async () => {
@@ -75,8 +81,13 @@ function CourseDetail({ course, back, setPage, lessons, initialLessonId, user })
     setSaving(true)
     try { await setDoc(doc(db, 'courses', course.id, 'lessons', unit.id), { ...changes, ownerId: user.uid, webEdit: { status: 'pending', changes, requestedAt: serverTimestamp() }, updatedAt: serverTimestamp() }, { merge: true }); setEditing(false) } finally { setSaving(false) }
   }
-  if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.inventoryState || '待處理'} · 原始字幕 ${course.rawCaptionCount || 0} 份`} back={back} /><div className="course-detail"><div><span className="eyebrow">尚未建立網站單元</span><h2>這門課已完成盤點，尚未進入整理流程。</h2><p>原始資料仍留在本機待處理課程資料夾。開始字幕潤飾與單元筆記後，網站會自動建立可搜尋的課程內容。</p></div><div className="detail-actions"><button onClick={() => setPage('courses')}><FolderOpen size={22} />回到課程庫</button></div></div></section>
-  return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${course.category} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />
+  const saveCourse = async () => {
+    setCourseSaving(true)
+    try { await setDoc(doc(db, 'courses', course.id), { ownerId: user.uid, manualCategory: courseDraft.category.trim() || course.category || '待分類', manualTags: courseDraft.tags.split(/[、,，\n]/).map(item => item.trim()).filter(Boolean), manualInventoryState: courseDraft.state, manualUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true }); setCourseEditing(false) } finally { setCourseSaving(false) }
+  }
+  const courseEditor = <div className="course-management"><button className="course-management-toggle" onClick={() => setCourseEditing(value => !value)}>{courseEditing ? '取消分類調整' : '調整分類與狀態'}</button>{courseEditing && <div className="course-editor"><label>領域<input value={courseDraft.category} onChange={event => setCourseDraft({ ...courseDraft, category: event.target.value })} placeholder="例如：命理｜人生規劃" /></label><label>標籤（以頓號或逗號分隔）<input value={courseDraft.tags} onChange={event => setCourseDraft({ ...courseDraft, tags: event.target.value })} placeholder="例如：八字、五行、人生規劃" /></label><label>處理狀態<select value={courseDraft.state} onChange={event => setCourseDraft({ ...courseDraft, state: event.target.value })}>{['有筆記', '字幕已整理', '待整理', '無字幕'].map(item => <option key={item}>{item}</option>)}</select></label><button onClick={saveCourse} disabled={courseSaving}>{courseSaving ? '儲存中…' : '儲存課程設定'}</button><small>此處的手動設定會優先於自動盤點結果，不會被後續同步覆蓋。</small></div>}</div>
+  if (!unit) return <section className="app-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${courseCategory(course)} · ${courseState(course)} · 原始字幕 ${course.rawCaptionCount || 0} 份`} back={back} />{courseEditor}<div className="course-detail"><div><span className="eyebrow">尚未建立網站單元</span><h2>這門課已完成盤點，尚未進入整理流程。</h2><p>原始資料仍留在本機待處理課程資料夾。開始字幕潤飾與單元筆記後，網站會自動建立可搜尋的課程內容。</p></div><div className="detail-actions"><button onClick={() => setPage('courses')}><FolderOpen size={22} />回到課程庫</button></div></div></section>
+  return <section className="app-page course-detail-page"><PageHeader eyebrow="課程詳情" title={course.title} description={`${courseCategory(course)} · ${courseState(course)} · ${course.lessonCount || 0} 部影片 · ${course.processedCaptionCount || 0} 份字幕已整理`} back={back} />{courseEditor}
     <div className="course-detail-layout"><aside className="unit-sidebar"><div><span className="eyebrow">已處理字幕單元</span><strong>{lessons.length.toString().padStart(2, '0')}</strong></div>{lessons.map(item => <button key={item.id} onClick={() => setUnit(item)} className={unit.id === item.id ? 'selected' : ''}><span>{item.status}</span><b>{item.title}</b><small><Clock3 size={17} />{item.duration}</small></button>)}</aside>
       <article className="lesson-panel"><header><span className="eyebrow">目前閱讀</span><h2>{unit.title}</h2><div className="lesson-meta"><span><Video size={20} />影片長度 {unit.duration}</span><span><FileText size={20} />原始字幕已保留</span></div></header>
         <div className="lesson-tabs"><button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>重點筆記</button>{(unit.tools?.length || unit.steps?.length) > 0 && <button className={tab === 'methods' ? 'active' : ''} onClick={() => setTab('methods')}>工具與方法</button>}{unit.prompts?.length > 0 && <button className={tab === 'prompt' ? 'active' : ''} onClick={() => setTab('prompt')}>提示詞與工作流</button>}{unit.sourceReferences?.length > 0 && <button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>來源時間碼</button>}</div>
@@ -103,7 +114,7 @@ function Chat({ back, setPage, courseList, openResult }) {
     setSearching(true)
     const terms = text.toLowerCase().split(/\s+/).filter(Boolean)
     try {
-      const courseMatches = courseList.map(course => ({ type: '課程', title: course.title, detail: [course.category, ...(course.tags || [])].join(' · '), source: '課程總覽', courseId: course.id })).filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term)))
+      const courseMatches = courseList.map(course => ({ type: '課程', title: course.title, detail: [courseCategory(course), ...courseTags(course)].join(' · '), source: '課程總覽', courseId: course.id })).filter(item => terms.every(term => `${item.title} ${item.detail}`.toLowerCase().includes(term)))
       const courseIndexes = (await Promise.all(courseList.map(async course => {
         const [lessonSnapshot, transcriptSnapshot] = await Promise.all([
           getDocs(collection(db, 'courses', course.id, 'lessons')),
@@ -185,7 +196,7 @@ export function App() {
       if (snapshot.empty) return
       const nextCourses = snapshot.docs.map(item => ({ id: item.id, ...item.data() }))
       setCourseList(nextCourses)
-      setSelectedCourse(current => current && nextCourses.some(item => item.id === current.id) ? current : nextCourses[0])
+      setSelectedCourse(current => current ? nextCourses.find(item => item.id === current.id) || nextCourses[0] : nextCourses[0])
     })
     const stopJobs = onSnapshot(ownJobs, snapshot => setJobs(snapshot.docs.map(item => ({ id: item.id, ...item.data() }))))
     return () => { stopCourses(); stopJobs() }
