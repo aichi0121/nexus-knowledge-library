@@ -196,7 +196,7 @@ async function main() {
   if (users.empty) throw new Error('找不到 Nexus 使用者，請先登入網站一次。')
   const ownerId = users.docs[0].id
   const syncStatus = db.doc('syncStatus/nexus')
-  await syncStatus.set({ ownerId, status: '同步中', lastStartedAt: FieldValue.serverTimestamp(), pendingSteps: 0, failureReason: '' }, { merge: true })
+  if (!dryRun) await syncStatus.set({ ownerId, status: '同步中', lastStartedAt: FieldValue.serverTimestamp(), pendingSteps: 0, failureReason: '' }, { merge: true })
   const folders = requestedCourse ? [resolve(requestedCourse)] : readdirSync(vaultCourses, { withFileTypes: true }).filter(item => item.isDirectory()).map(item => join(vaultCourses, item.name))
   if (folders.some(folder => !existsSync(folder))) throw new Error(`找不到指定課程：${requestedCourse}`)
   let totalSegments = 0
